@@ -655,21 +655,15 @@ export default function KarnaPrototype() {
 
   return (
     <div style={{
-      minHeight: "100vh", background: "#03050a", display: "flex",
-      justifyContent: "center", alignItems: "center", padding: "24px 10px",
+      minHeight: "100vh", width: "100%", position: "relative",
+      background: C.bgGradient, color: C.text, display: "flex", flexDirection: "column",
     }}>
       <style>{FONT_IMPORT}</style>
-      <div style={{
-        width: 390, maxWidth: "100%", height: 780, borderRadius: 34,
-        border: "6px solid #111318", overflow: "hidden", position: "relative",
-        background: C.bgGradient, color: C.text, boxShadow: "0 30px 80px rgba(0,0,0,.55)",
-        display: "flex", flexDirection: "column",
-      }}>
-        <div style={{ flex: 1, overflowY: "auto", ...body }}>
-          {syncError && (
-            <div className="fade-up" style={{
-              background: "rgba(224,143,143,0.15)", border: "1px solid rgba(224,143,143,0.35)",
-              color: "#E08F8F", fontSize: 11.5, padding: "10px 16px", display: "flex",
+      <div style={{ flex: 1, overflowY: "auto", ...body }}>
+        {syncError && (
+          <div className="fade-up" style={{
+            background: "rgba(224,143,143,0.15)", border: "1px solid rgba(224,143,143,0.35)",
+            color: "#E08F8F", fontSize: 11.5, padding: "10px 16px", display: "flex",
               justifyContent: "space-between", alignItems: "center", gap: 10,
             }}>
               <span>{syncError}</span>
@@ -1412,10 +1406,10 @@ export default function KarnaPrototype() {
         )}
       </div>
       )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
           </>
         )}
-        </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
 
         {!isOnboarding && page === "log" && mode === "idle" && (
           <button
@@ -1466,11 +1460,9 @@ export default function KarnaPrototype() {
             })}
           </div>
         )}
-      </div>
     </div>
   );
 }
-
 const onbLabel = { fontSize: 12, color: C.textDim, display: "block", margin: "14px 0 6px" };
 const onbInput = {
   width: "100%", background: "rgba(255,255,255,0.055)", border: `1px solid rgba(255,255,255,0.06)`, borderRadius: 16,
