@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+aimport { useState, useRef, useEffect } from "react";
 import {
   Terminal, Camera, Keyboard, Loader2, Send, Sparkles,
   Check, X, ChevronRight, ChevronLeft, Flame, Dot, ChevronDown, Mail, LayoutGrid, TrendingUp, Home,
@@ -230,7 +230,7 @@ const FALLBACK = {
 };
 
 async function callClaude(messages, system) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -332,6 +332,19 @@ const UNITS = [
 const UNIT_LABELS = Object.fromEntries(UNITS.map((u) => [u.v, u.l]));
 const FALLBACK_UNIT_GRAMS = { g: 1, ml: 1, dl: 100, msk: 15, tsk: 5, kopp: 240, st: 100 };
 
+async function lookupFoodDatabase(name) {
+  try {
+    const res = await fetch("/api/food-lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: name }),
+    });
+    return await res.json();
+  } catch (e) {
+    return { found: false };
+  }
+}
+
 async function estimateFoodValues(name, amountStr, unit, known100Obj) {
   const isGrams = unit === "g";
   const knownPer100 = {};
@@ -339,7 +352,21 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
     const v = known100Obj[key];
     if (v !== undefined && v !== "" && !isNaN(Number(v))) knownPer100[key] = Number(v);
   });
-  const missingKeys = KNOWN_FIELDS.map((f) => f.key).filter((k) => !(k in knownPer100));
+
+  // slå upp riktig databas (USDA / Open Food Facts) för de fält användaren inte redan angett
+  const dbResult = await lookupFoodDatabase(name);
+  const dbPer100 = {};
+  let dbSource = null;
+  if (dbResult.found) {
+    dbSource = dbResult.source;
+    KNOWN_FIELDS.forEach(({ key }) => {
+      if (!(key in knownPer100) && typeof dbResult.per100[key] === "number") {
+        dbPer100[key] = dbResult.per100[key];
+      }
+    });
+  }
+
+  const missingKeys = KNOWN_FIELDS.map((f) => f.key).filter((k) => !(k in knownPer100) && !(k in dbPer100));
 
   try {
     const system =
@@ -368,22 +395,22 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
     const microAmounts = parsed.micro_amounts || {};
     const bonus = parsed.bonus || [];
 
-    const combinedPer100 = { ...aiPer100, ...knownPer100 };
+    const combinedPer100 = { ...aiPer100, ...dbPer100, ...knownPer100 };
     const scaled = {};
     KNOWN_FIELDS.forEach(({ key }) => {
       const v = combinedPer100[key];
       scaled[key] = typeof v === "number" ? Math.round(v * factor * 10) / 10 : 0;
     });
-    return { ...scaled, microAmounts, bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), ok: true };
+    return { ...scaled, microAmounts, bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, ok: true };
   } catch (e) {
     const estimatedGrams = isGrams ? Number(amountStr) : Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100);
     const factor = estimatedGrams / 100;
     const scaled = {};
     KNOWN_FIELDS.forEach(({ key }) => {
-      const v = knownPer100[key] ?? FALLBACK[key];
+      const v = knownPer100[key] ?? dbPer100[key] ?? FALLBACK[key];
       scaled[key] = Math.round(v * factor * 10) / 10;
     });
-    return { ...scaled, microAmounts: FALLBACK.microAmounts, bonus: FALLBACK.bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), ok: false };
+    return { ...scaled, microAmounts: FALLBACK.microAmounts, bonus: FALLBACK.bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, ok: false };
   }
 }
 
@@ -1293,6 +1320,9 @@ export default function KarnaPrototype() {
                 <div>
                   <div style={{ ...display, fontSize: 19, fontWeight: 600 }}>{foodName || "Måltid"}</div>
                   {weight && <div style={{ ...mono, fontSize: 12.5, color: C.textFaint }}>{weight} {UNIT_LABELS[weightUnit]}</div>}
+                  {result.source && (
+                    <div style={{ fontSize: 10.5, color: C.accent, marginTop: 3 }}>Källa: {result.source}</div>
+                  )}
                 </div>
                 <div style={{ ...mono, fontSize: 22, fontWeight: 600, color: C.accent }}>
                   {Math.round(result.kcal)} <span style={{ fontSize: 12, color: C.textFaint }}>kcal</span>
