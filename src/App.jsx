@@ -1,4 +1,4 @@
-aimport { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Terminal, Camera, Keyboard, Loader2, Send, Sparkles,
   Check, X, ChevronRight, ChevronLeft, Flame, Dot, ChevronDown, Mail, LayoutGrid, TrendingUp, Home,
