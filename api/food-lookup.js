@@ -16,7 +16,11 @@ export default async function handler(req, res) {
       `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=5`
     );
     const offData = await offRes.json();
-    const product = (offData.products || []).find((p) => p.nutriments && (p.nutriments["energy-kcal_100g"] || p.nutriments["energy-kcal"]));
+    const candidates = (offData.products || []).filter((p) => p.nutriments && (p.nutriments["energy-kcal_100g"] || p.nutriments["energy-kcal"]));
+    const q = query.trim().toLowerCase();
+    // prioritera produkter vars namn faktiskt liknar sökningen, före bara första träffen
+    const closeMatch = candidates.find((p) => (p.product_name || "").toLowerCase().includes(q) || q.includes((p.product_name || "").toLowerCase()));
+    const product = closeMatch || candidates[0];
     if (product) {
       const n = product.nutriments;
       return res.status(200).json({
