@@ -357,8 +357,10 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
   const dbResult = await lookupFoodDatabase(name);
   const dbPer100 = {};
   let dbSource = null;
+  let dbMatchedName = null;
   if (dbResult.found) {
     dbSource = dbResult.source;
+    dbMatchedName = dbResult.name;
     KNOWN_FIELDS.forEach(({ key }) => {
       if (!(key in knownPer100) && typeof dbResult.per100[key] === "number") {
         dbPer100[key] = dbResult.per100[key];
@@ -401,7 +403,7 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
       const v = combinedPer100[key];
       scaled[key] = typeof v === "number" ? Math.round(v * factor * 10) / 10 : 0;
     });
-    return { ...scaled, microAmounts, bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, ok: true };
+    return { ...scaled, microAmounts, bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, matchedName: dbMatchedName, ok: true };
   } catch (e) {
     const estimatedGrams = isGrams ? Number(amountStr) : Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100);
     const factor = estimatedGrams / 100;
@@ -410,7 +412,7 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
       const v = knownPer100[key] ?? dbPer100[key] ?? FALLBACK[key];
       scaled[key] = Math.round(v * factor * 10) / 10;
     });
-    return { ...scaled, microAmounts: FALLBACK.microAmounts, bonus: FALLBACK.bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, ok: false };
+    return { ...scaled, microAmounts: FALLBACK.microAmounts, bonus: FALLBACK.bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, matchedName: dbMatchedName, ok: false };
   }
 }
 
@@ -1321,7 +1323,9 @@ export default function KarnaPrototype() {
                   <div style={{ ...display, fontSize: 19, fontWeight: 600 }}>{foodName || "Måltid"}</div>
                   {weight && <div style={{ ...mono, fontSize: 12.5, color: C.textFaint }}>{weight} {UNIT_LABELS[weightUnit]}</div>}
                   {result.source && (
-                    <div style={{ fontSize: 10.5, color: C.accent, marginTop: 3 }}>Källa: {result.source}</div>
+                    <div style={{ fontSize: 10.5, color: C.accent, marginTop: 3 }}>
+                      Källa: {result.source}{result.matchedName ? ` · Träff: "${result.matchedName}"` : ""}
+                    </div>
                   )}
                 </div>
                 <div style={{ ...mono, fontSize: 22, fontWeight: 600, color: C.accent }}>
