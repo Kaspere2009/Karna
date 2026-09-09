@@ -47,10 +47,13 @@ export default async function handler(req, res) {
   const usdaKey = process.env.USDA_API_KEY || "DEMO_KEY";
   try {
     const usdaRes = await fetch(
-      `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&pageSize=3&api_key=${usdaKey}`
+      `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&pageSize=5&dataType=Foundation,SR%20Legacy&api_key=${usdaKey}`
     );
     const usdaData = await usdaRes.json();
-    const food = (usdaData.foods || [])[0];
+    const usdaCandidates = usdaData.foods || [];
+    const uq = query.trim().toLowerCase();
+    const usdaCloseMatch = usdaCandidates.find((f) => (f.description || "").toLowerCase().startsWith(uq));
+    const food = usdaCloseMatch || usdaCandidates[0];
     if (food) {
       const get = (name) => {
         const n = (food.foodNutrients || []).find((x) => x.nutrientName === name);
