@@ -18,9 +18,12 @@ export default async function handler(req, res) {
     const offData = await offRes.json();
     const candidates = (offData.products || []).filter((p) => p.nutriments && (p.nutriments["energy-kcal_100g"] || p.nutriments["energy-kcal"]));
     const q = query.trim().toLowerCase();
+    const askedForProcessedOff = /(dried|dehydrated|powder|chips|juice|canned|cooked|frozen)/i.test(q);
+    const plainCandidates = askedForProcessedOff ? candidates : candidates.filter((p) => !/(dried|dehydrated|powder|chips|juice|canned|cooked|frozen)/i.test(p.product_name || ""));
+    const pool = plainCandidates.length ? plainCandidates : candidates;
     // prioritera produkter vars namn faktiskt liknar sökningen, före bara första träffen
-    const closeMatch = candidates.find((p) => (p.product_name || "").toLowerCase().includes(q) || q.includes((p.product_name || "").toLowerCase()));
-    const product = closeMatch || candidates[0];
+    const closeMatch = pool.find((p) => (p.product_name || "").toLowerCase().includes(q) || q.includes((p.product_name || "").toLowerCase()));
+    const product = closeMatch || pool[0];
     if (product) {
       const n = product.nutriments;
       return res.status(200).json({
@@ -52,8 +55,12 @@ export default async function handler(req, res) {
     const usdaData = await usdaRes.json();
     const usdaCandidates = usdaData.foods || [];
     const uq = query.trim().toLowerCase();
-    const usdaCloseMatch = usdaCandidates.find((f) => (f.description || "").toLowerCase().startsWith(uq));
-    const food = usdaCloseMatch || usdaCandidates[0];
+    const startsWithQuery = usdaCandidates.filter((f) => (f.description || "").toLowerCase().startsWith(uq));
+    const pool = startsWithQuery.length ? startsWithQuery : usdaCandidates;
+    // om användaren inte själv bad om en specifik form (torkad, pulver osv), föredra den vanliga/färska varianten
+    const askedForProcessed = /(dried|dehydrated|powder|chips|juice|canned|cooked|frozen)/i.test(uq);
+    const rawMatch = !askedForProcessed && pool.find((f) => /,\s*raw\b/i.test(f.description || ""));
+    const food = rawMatch || pool[0];
     if (food) {
       const get = (name) => {
         const n = (food.foodNutrients || []).find((x) => x.nutrientName === name);
