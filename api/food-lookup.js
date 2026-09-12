@@ -21,9 +21,10 @@ export default async function handler(req, res) {
     const askedForProcessedOff = /(dried|dehydrated|powder|chips|juice|canned|cooked|frozen)/i.test(q);
     const plainCandidates = askedForProcessedOff ? candidates : candidates.filter((p) => !/(dried|dehydrated|powder|chips|juice|canned|cooked|frozen)/i.test(p.product_name || ""));
     const pool = plainCandidates.length ? plainCandidates : candidates;
-    // prioritera produkter vars namn faktiskt liknar sökningen, före bara första träffen
-    const closeMatch = pool.find((p) => (p.product_name || "").toLowerCase().includes(q) || q.includes((p.product_name || "").toLowerCase()));
-    const product = closeMatch || pool[0];
+    // striktare matchning: bara exakt namn eller att produktnamnet BÖRJAR med sökningen (inte "innehåller" — det gav falska träffar som hela rätter/sallader bara för att ett ord förekom i en lång produktbeskrivning)
+    const exactMatch = pool.find((p) => (p.product_name || "").toLowerCase() === q);
+    const prefixMatch = pool.find((p) => (p.product_name || "").toLowerCase().startsWith(q + " ") || (p.product_name || "").toLowerCase().startsWith(q + ","));
+    const product = exactMatch || prefixMatch || null; // ingen lös träff — hellre inget än fel
     if (product) {
       const n = product.nutriments;
       return res.status(200).json({
@@ -63,8 +64,11 @@ export default async function handler(req, res) {
     const food = rawMatch || pool[0];
     if (food) {
       const get = (name) => {
-        const n = (food.foodNutrients || []).find((x) => x.nutrientName === name);
-        return n ? n.value : 0;
+        const n = (food.foodNutrients || []).find((x) => x.nutrientName === name && (x.unitName === "KCAL" || x.unitName === "G" || !x.unitName));
+        if (n) return n.value;
+        // fallback om ingen exakt enhetsmatchning hittades
+        const anyMatch = (food.foodNutrients || []).find((x) => x.nutrientName === name);
+        return anyMatch ? anyMatch.value : 0;
       };
       return res.status(200).json({
         found: true,
