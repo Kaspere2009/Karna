@@ -2388,12 +2388,47 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
       return { ...w, [selectedDay]: merged };
     });
   }
-  function handlePhoto(e) {
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+
+  async function handlePhoto(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => updateDay("photo", reader.result);
-    reader.readAsDataURL(file);
+
+    // utan inloggning finns ingen lagring att ladda upp till — visa bilden lokalt istället
+    if (!session) {
+      const reader = new FileReader();
+      reader.onload = () => updateDay("photo", reader.result);
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    setPhotoUploading(true); setPhotoError("");
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${session.user.id}/${selectedDay}.${ext}`;
+      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/progress-photos/${path}`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": file.type || "image/jpeg",
+          "x-upsert": "true", // skriv över om man laddar upp en ny bild för samma dag
+        },
+        body: file,
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        throw new Error(`Uppladdningen misslyckades (${res.status}): ${errBody}`);
+      }
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/progress-photos/${path}?t=${Date.now()}`;
+      updateDay("photo", publicUrl);
+    } catch (err) {
+      setPhotoError(err.message);
+      console.error("Kunde inte ladda upp bilden:", err.message);
+    } finally {
+      setPhotoUploading(false);
+    }
   }
 
   return (
@@ -2509,7 +2544,12 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
           gap: 8, borderRadius: 16, padding: "26px 12px", cursor: "pointer", marginBottom: 24, overflow: "hidden",
         }}
       >
-        {dayData.photo ? (
+        {photoUploading ? (
+          <>
+            <Loader2 size={20} color={C.accent} style={{ animation: "spin 1s linear infinite" }} />
+            <span style={{ fontSize: 12.5, color: C.textDim }}>Laddar upp bilden…</span>
+          </>
+        ) : dayData.photo ? (
           <img src={dayData.photo} alt="progressbild" style={{ maxHeight: 160, borderRadius: 10 }} />
         ) : (
           <>
@@ -2520,6 +2560,9 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
         )}
       </label>
       <input id="progress-photo" type="file" accept="image/*" onChange={handlePhoto} style={{ display: "none" }} />
+      {photoError && (
+        <p style={{ fontSize: 11, color: "#E08F8F", marginTop: -12, marginBottom: 20 }}>{photoError}</p>
+      )}
     </div>
   );
 }
