@@ -93,6 +93,39 @@ async function supabaseRest(path, { method = "GET", body, accessToken, params, u
   return res.json();
 }
 
+// ---------- inloggning som håller i sig (sparas + förnyas automatiskt) ----------
+const SESSION_STORAGE_KEY = "karna-session";
+
+function buildSession(data) {
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+    user: data.user,
+  };
+}
+
+function saveStoredSession(s) {
+  try {
+    if (s) localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(s));
+    else localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (e) {}
+}
+
+function loadStoredSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function refreshSession(refreshToken) {
+  const data = await supabaseAuth("token?grant_type=refresh_token", { refresh_token: refreshToken });
+  return buildSession(data);
+}
+
 const glass = {
   background: C.surface,
   border: `1px solid ${C.border}`,
@@ -419,11 +452,69 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
 export default function KarnaPrototype() {
   const [page, setPage] = useState("login"); // login | email-login | auth | profile | log | dashboard
   const [authInfo, setAuthInfo] = useState({ email: "", password: "" });
-  const [session, setSession] = useState(null); // { access_token, user: { id, email } }
+  const [session, setSession] = useState(null); // { access_token, refresh_token, expires_at, user: { id, email } }
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [dataLoaded, setDataLoaded] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const [restoring, setRestoring] = useState(() => !!loadStoredSession()?.refresh_token);
+
+  // när appen öppnas: logga in automatiskt om det finns en sparad inloggning
+  useEffect(() => {
+    const stored = loadStoredSession();
+    if (!stored?.refresh_token) return;
+    (async () => {
+      try {
+        const fresh = await refreshSession(stored.refresh_token);
+        await startSession(fresh);
+      } catch (e) {
+        console.error("Kunde inte återställa inloggningen:", e.message);
+        saveStoredSession(null);
+      } finally {
+        setRestoring(false);
+      }
+    })();
+  }, []);
+
+  // spara inloggningen på enheten, och rensa den vid utloggning
+  useEffect(() => {
+    if (session) saveStoredSession(session);
+    else if (!restoring) saveStoredSession(null);
+  }, [session, restoring]);
+
+  // förnya åtkomstbiljetten 5 min innan den går ut, och när appen öppnas igen
+  useEffect(() => {
+    if (!session?.refresh_token) return;
+    const REFRESH_MARGIN = 5 * 60 * 1000;
+    let cancelled = false;
+
+    async function doRefresh() {
+      try {
+        const fresh = await refreshSession(session.refresh_token);
+        if (!cancelled) setSession(fresh);
+      } catch (e) {
+        console.error("Kunde inte förnya inloggningen:", e.message);
+        if (!cancelled) setSyncError("Din inloggning har gått ut — logga ut och in igen.");
+      }
+    }
+
+    const msLeft = session.expires_at * 1000 - Date.now() - REFRESH_MARGIN;
+    const timer = setTimeout(doRefresh, Math.max(msLeft, 0));
+
+    function onVisible() {
+      if (document.visibilityState === "visible" && session.expires_at * 1000 - Date.now() < REFRESH_MARGIN) {
+        doRefresh();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [session]);
+
   const [profileInfo, setProfileInfo] = useState({
     name: "", age: "", sex: "kvinna", height: "", weight: "",
     activity: "moderat", goal: [],
@@ -471,7 +562,7 @@ export default function KarnaPrototype() {
     try {
       const data = await supabaseAuth("signup", { email: authInfo.email, password: authInfo.password });
       if (data.access_token) {
-        setSession({ access_token: data.access_token, user: data.user });
+        setSession(buildSession(data));
         await loadUserData(data.access_token, data.user.id); // clears any leftover demo data — new account starts empty
         setPage("profile");
       } else {
@@ -517,28 +608,32 @@ export default function KarnaPrototype() {
     setDataLoaded(true);
   }
 
+  async function startSession(sess) {
+    setSession(sess);
+    const profiles = await supabaseRest("profiles", { accessToken: sess.access_token, params: { id: `eq.${sess.user.id}`, select: "*" } });
+    await loadUserData(sess.access_token, sess.user.id);
+    if (profiles && profiles.length > 0) {
+      const p = profiles[0];
+      setProfileInfo({
+        name: "", age: String(p.age || ""), sex: p.sex || "kvinna", height: String(p.height_cm || ""),
+        weight: String(p.weight_kg || ""), activity: p.activity || "moderat", goal: p.goals || [],
+      });
+      setTargets({
+        kcal: p.target_kcal || DAILY_TARGETS.kcal, protein_g: p.target_protein_g || DAILY_TARGETS.protein_g,
+        carbs_g: p.target_carbs_g || DAILY_TARGETS.carbs_g, fat_g: p.target_fat_g || DAILY_TARGETS.fat_g,
+      });
+      setUnits({ weight: p.units_weight || "kg", height: p.units_height || "cm" });
+      setPage("log");
+    } else {
+      setPage("profile");
+    }
+  }
+
   async function handleLogin() {
     setAuthLoading(true); setAuthError("");
     try {
       const data = await supabaseAuth("token?grant_type=password", { email: authInfo.email, password: authInfo.password });
-      setSession({ access_token: data.access_token, user: data.user });
-      const profiles = await supabaseRest("profiles", { accessToken: data.access_token, params: { id: `eq.${data.user.id}`, select: "*" } });
-      await loadUserData(data.access_token, data.user.id);
-      if (profiles && profiles.length > 0) {
-        const p = profiles[0];
-        setProfileInfo({
-          name: "", age: String(p.age || ""), sex: p.sex || "kvinna", height: String(p.height_cm || ""),
-          weight: String(p.weight_kg || ""), activity: p.activity || "moderat", goal: p.goals || [],
-        });
-        setTargets({
-          kcal: p.target_kcal || DAILY_TARGETS.kcal, protein_g: p.target_protein_g || DAILY_TARGETS.protein_g,
-          carbs_g: p.target_carbs_g || DAILY_TARGETS.carbs_g, fat_g: p.target_fat_g || DAILY_TARGETS.fat_g,
-        });
-        setUnits({ weight: p.units_weight || "kg", height: p.units_height || "cm" });
-        setPage("log");
-      } else {
-        setPage("profile");
-      }
+      await startSession(buildSession(data));
     } catch (e) {
       setAuthError(e.message);
     } finally {
@@ -681,6 +776,15 @@ export default function KarnaPrototype() {
 
   const update = (key) => (v) => setResult((r) => ({ ...r, [key]: v }));
   const isOnboarding = page === "login" || page === "email-login" || page === "auth" || page === "profile";
+
+  if (restoring) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.bgGradient, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        <Loader2 size={24} color={C.accent} style={{ animation: "spin 1s linear infinite" }} />
+      </div>
+    );
+  }
 
   return (
     <div style={{
