@@ -121,6 +121,20 @@ function loadStoredSession() {
   }
 }
 
+async function supabaseGetUser(accessToken) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.msg || data.error_description || "Kunde inte hämta användaren.");
+  return data;
+}
+
+function startGoogleLogin() {
+  const redirectTo = encodeURIComponent(window.location.origin);
+  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}`;
+}
+
 async function refreshSession(refreshToken) {
   const data = await supabaseAuth("token?grant_type=refresh_token", { refresh_token: refreshToken });
   return buildSession(data);
@@ -457,10 +471,42 @@ export default function KarnaPrototype() {
   const [authError, setAuthError] = useState("");
   const [dataLoaded, setDataLoaded] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const [restoring, setRestoring] = useState(() => !!loadStoredSession()?.refresh_token);
+  const [restoring, setRestoring] = useState(() =>
+    !!loadStoredSession()?.refresh_token || window.location.hash.includes("access_token")
+  );
 
   // när appen öppnas: logga in automatiskt om det finns en sparad inloggning
   useEffect(() => {
+    // tillbaka från Google: inloggningsuppgifterna ligger i adressen efter #
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    if (hash.get("access_token") || hash.get("error")) {
+      window.history.replaceState(null, "", window.location.pathname); // städa bort dem ur adressfältet
+    }
+    if (hash.get("error")) {
+      setAuthError("Google-inloggningen misslyckades: " + (hash.get("error_description") || hash.get("error")));
+    }
+    if (hash.get("access_token")) {
+      (async () => {
+        try {
+          const accessToken = hash.get("access_token");
+          const user = await supabaseGetUser(accessToken);
+          await startSession(buildSession({
+            access_token: accessToken,
+            refresh_token: hash.get("refresh_token"),
+            expires_at: Number(hash.get("expires_at")) || undefined,
+            expires_in: Number(hash.get("expires_in")) || 3600,
+            user,
+          }));
+        } catch (e) {
+          console.error("Google-inloggningen misslyckades:", e.message);
+          setAuthError("Google-inloggningen misslyckades: " + e.message);
+        } finally {
+          setRestoring(false);
+        }
+      })();
+      return;
+    }
+
     const stored = loadStoredSession();
     if (!stored?.refresh_token) return;
     (async () => {
@@ -830,12 +876,13 @@ export default function KarnaPrototype() {
                   Mår kärnan bra, mår hela kroppen bra.
                 </p>
 
-                <button onClick={() => setPage("profile")} style={socialBtn}>
-                  <AppleIcon /> Fortsätt med Apple
-                </button>
-                <button onClick={() => setPage("profile")} style={{ ...socialBtn, marginTop: 10 }}>
+                <button onClick={startGoogleLogin} style={socialBtn}>
                   <GoogleIcon /> Fortsätt med Google
                 </button>
+                <button disabled style={{ ...socialBtn, marginTop: 10, opacity: 0.45, cursor: "default" }}>
+                  <AppleIcon /> Apple — kommer snart
+                </button>
+                {authError && <p style={{ fontSize: 11.5, color: "#E08F8F", marginTop: 12, textAlign: "center" }}>{authError}</p>}
 
                 <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "20px 0" }}>
                   <div style={{ flex: 1, height: 1, background: C.border }} />
