@@ -452,14 +452,16 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
     });
     return { ...scaled, microAmounts, bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, matchedName: dbMatchedName, ok: true };
   } catch (e) {
+    // AI:n gick inte att nå — använd bara riktiga värden (databasen / det användaren fyllt i), aldrig påhittade
+    const hasRealValues = Object.keys(knownPer100).length > 0 || Object.keys(dbPer100).length > 0;
     const estimatedGrams = isGrams ? Number(amountStr) : Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100);
     const factor = estimatedGrams / 100;
     const scaled = {};
     KNOWN_FIELDS.forEach(({ key }) => {
-      const v = knownPer100[key] ?? dbPer100[key] ?? FALLBACK[key];
+      const v = knownPer100[key] ?? dbPer100[key] ?? 0;
       scaled[key] = Math.round(v * factor * 10) / 10;
     });
-    return { ...scaled, microAmounts: FALLBACK.microAmounts, bonus: FALLBACK.bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, matchedName: dbMatchedName, ok: false };
+    return { ...scaled, microAmounts: {}, bonus: [], estimatedKeys: [], estimatedGrams: Math.round(estimatedGrams), source: dbSource, matchedName: dbMatchedName, ok: false, notFound: !hasRealValues };
   }
 }
 
@@ -745,9 +747,15 @@ export default function KarnaPrototype() {
     if (!foodName.trim() || !weight.trim()) return;
     setLoading(true); setError("");
     const res = await estimateFoodValues(foodName, weight, weightUnit, known100);
+    if (res.notFound) {
+      setError(`Hittade inte "${foodName}" i databasen. Kolla stavningen, prova ett annat ord eller engelska (t.ex. "chicken breast") — eller fyll i värdena från förpackningen här nedanför.`);
+      setShow100(true);
+      setLoading(false);
+      return;
+    }
     setResult(res);
     setMode("result");
-    if (!res.ok) setError("Kunde inte nå AI:n just nu — fyllde i uppskattade fält med exempel-värden.");
+    if (!res.ok) setError("Vitaminer och mineraler kunde inte räknas ut just nu (kräver AI). Makrovärdena kommer från databasen eller det du fyllt i.");
     setLoading(false);
   }
 
@@ -777,11 +785,7 @@ export default function KarnaPrototype() {
       setFoodName(photoDesc.trim() || "Foto-loggad måltid");
       setMode("result");
     } catch (e) {
-      const allKeys = KNOWN_FIELDS.map((f) => f.key);
-      setResult({ ...FALLBACK, estimatedKeys: allKeys });
-      setFoodName(photoDesc.trim() || "Foto-loggad måltid");
-      setMode("result");
-      setError("Kunde inte nå AI:n just nu — visar exempel-värden istället.");
+      setError("Bildloggning kräver AI, som inte är aktiverad än. Logga manuellt så länge.");
     } finally {
       setLoading(false);
     }
@@ -1406,8 +1410,11 @@ export default function KarnaPrototype() {
               </div>
             )}
 
+            {error && (
+              <p className="fade-up" style={{ fontSize: 12, color: C.estimate, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>
+            )}
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setMode("choose")} style={ghostBtn}>Tillbaka</button>
+              <button onClick={() => { setMode("choose"); setError(""); }} style={ghostBtn}>Tillbaka</button>
               <button
                 onClick={estimateManual} disabled={!foodName.trim() || !weight.trim() || loading}
                 style={{ ...primaryBtn, opacity: !foodName.trim() || !weight.trim() ? 0.5 : 1 }}
@@ -1453,8 +1460,11 @@ export default function KarnaPrototype() {
                 padding: "10px 12px", color: C.text, fontSize: 13.5, marginBottom: 22, outline: "none", resize: "vertical",
               }}
             />
+            {error && (
+              <p className="fade-up" style={{ fontSize: 12, color: C.estimate, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>
+            )}
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setMode("choose")} style={ghostBtn}>Tillbaka</button>
+              <button onClick={() => { setMode("choose"); setError(""); }} style={ghostBtn}>Tillbaka</button>
               <button
                 onClick={estimatePhoto} disabled={!photoData || loading}
                 style={{ ...primaryBtn, opacity: !photoData ? 0.5 : 1 }}
@@ -2266,8 +2276,14 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
     if (!ingName.trim() || !ingWeight.trim()) return;
     setIngLoading(true); setIngError("");
     const res = await estimateFoodValues(ingName, ingWeight, ingUnit, ingKnown100);
+    if (res.notFound) {
+      setIngError(`Hittade inte "${ingName}" i databasen. Kolla stavningen, prova engelska (t.ex. "chicken breast") eller fyll i värdena per 100g nedanför.`);
+      setIngShow100(true);
+      setIngLoading(false);
+      return;
+    }
     setIngredients((list) => [...list, { name: ingName, weight: ingWeight, unit: ingUnit, ...res }]);
-    if (!res.ok) setIngError("Kunde inte nå AI:n just nu — la till ingrediensen med exempel-värden istället.");
+    if (!res.ok) setIngError("Ingrediensen är tillagd, men vitaminer och mineraler kunde inte räknas ut just nu (kräver AI).");
     setIngName(""); setIngWeight(""); setIngUnit("g"); setIngKnown100({}); setIngShow100(false);
     setIngLoading(false);
     setAdding(false);
