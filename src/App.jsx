@@ -388,11 +388,11 @@ async function lookupFoodDatabase(name) {
     });
     return await res.json();
   } catch (e) {
-    return { found: false };
+    return { results: [] };
   }
 }
 
-async function estimateFoodValues(name, amountStr, unit, known100Obj) {
+async function estimateFoodValues(name, amountStr, unit, known100Obj, dbHit = null) {
   const isGrams = unit === "g";
   const knownPer100 = {};
   KNOWN_FIELDS.forEach(({ key }) => {
@@ -400,69 +400,74 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj) {
     if (v !== undefined && v !== "" && !isNaN(Number(v))) knownPer100[key] = Number(v);
   });
 
-  // slå upp riktig databas (USDA / Open Food Facts) för de fält användaren inte redan angett
-  const dbResult = await lookupFoodDatabase(name);
+  // värden från den databasträff användaren valde (fält hen själv fyllt i går före)
   const dbPer100 = {};
-  let dbSource = null;
-  let dbMatchedName = null;
-  if (dbResult.found) {
-    dbSource = dbResult.source;
-    dbMatchedName = dbResult.name;
+  if (dbHit && dbHit.per100) {
     KNOWN_FIELDS.forEach(({ key }) => {
-      if (!(key in knownPer100) && typeof dbResult.per100[key] === "number") {
-        dbPer100[key] = dbResult.per100[key];
-      }
+      if (!(key in knownPer100) && typeof dbHit.per100[key] === "number") dbPer100[key] = dbHit.per100[key];
     });
   }
-
+  const dbMicros100 = dbHit && dbHit.micros100 && Object.keys(dbHit.micros100).length ? dbHit.micros100 : null;
   const missingKeys = KNOWN_FIELDS.map((f) => f.key).filter((k) => !(k in knownPer100) && !(k in dbPer100));
 
-  try {
-    const system =
-      "Du är en näringsdatabas-assistent. Du får ett livsmedel/dryck, en mängd (ev. i annan enhet än gram) och ev. värden användaren redan känner till (per 100g/100ml). " +
-      "Svara ENDAST med ett JSON-objekt (ingen text, inga markdown-fences) i exakt detta format: " +
-      '{"estimated_grams": number, "per100": {"kcal": number, "protein_g": number, "carbs_g": number, "sugar_g": number, ' +
-      '"fiber_g": number, "fat_g": number, "satfat_g": number, "transfat_g": number}, ' +
-      `"micro_amounts": {${MICRO_KEYS.map((k) => `"${k}": number`).join(", ")}}, ` +
-      '"bonus": [{"name": string, "amount": string, "reason": string}]} ' +
-      "estimated_grams: din bästa uppskattning av hur många gram den angivna mängden motsvarar (för vätskor kan du anta ca 1g per ml; 1 dl = 100ml, 1 msk = 15ml, 1 tsk = 5ml, 1 kopp ≈ 240ml, för 'st' uppskatta en rimlig genomsnittlig vikt för det livsmedlet). " +
-      "Fyll endast i uppskattade värden (typ USDA FoodData Central, per 100g/100ml) för dessa fält i \"per100\", resten ignoreras ändå: " + JSON.stringify(missingKeys) + ". " +
-      "Du kan fortfarande fylla i alla fält i per100 om du vill, de kända skrivs över ändå. " +
-      "micro_amounts: uppskatta den faktiska mängden (i den enhet listan anger, µg eller mg) av VARJE nämnt ämne för hela portionen (redan skalat till estimated_grams), sätt 0 om livsmedlet inte innehåller nämnvärt av det — hoppa inte över några nycklar. " +
-      "bonus: 0-2 icke-essentiella men nyttiga ämnen om relevant (t.ex. omega-3, polyfenoler, antioxidanter), amount som kort textsträng (t.ex. \"620mg\"), reason en kort mening (max ~12 ord) om varför ämnet är bra för hälsan. Lämna tomt om inget relevant.";
-    const text = await callClaude(
-      [{ role: "user", content:
-        `Livsmedel/dryck: ${name}\nAngiven mängd: ${amountStr} ${UNIT_LABELS[unit] || unit}\n` +
-        `Kända värden per 100g/100ml: ${JSON.stringify(knownPer100)}\n` +
-        `Nyckel → ämne (enhet): ${[...VITAMINS, ...MINERALS].map((m) => `${m.key}=${m.name}(${m.unit})`).join(", ")}` }],
-      system
-    );
-    const parsed = parseJsonLoose(text);
-    const estimatedGrams = isGrams ? Number(amountStr) : (parsed.estimated_grams || Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100));
-    const factor = estimatedGrams / 100;
-    const aiPer100 = parsed.per100 || {};
-    const microAmounts = parsed.micro_amounts || {};
-    const bonus = parsed.bonus || [];
-
-    const combinedPer100 = { ...aiPer100, ...dbPer100, ...knownPer100 };
-    const scaled = {};
-    KNOWN_FIELDS.forEach(({ key }) => {
-      const v = combinedPer100[key];
-      scaled[key] = typeof v === "number" ? Math.round(v * factor * 10) / 10 : 0;
-    });
-    return { ...scaled, microAmounts, bonus, estimatedKeys: missingKeys, estimatedGrams: Math.round(estimatedGrams), source: dbSource, matchedName: dbMatchedName, ok: true };
-  } catch (e) {
-    // AI:n gick inte att nå — använd bara riktiga värden (databasen / det användaren fyllt i), aldrig påhittade
-    const hasRealValues = Object.keys(knownPer100).length > 0 || Object.keys(dbPer100).length > 0;
-    const estimatedGrams = isGrams ? Number(amountStr) : Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100);
-    const factor = estimatedGrams / 100;
-    const scaled = {};
-    KNOWN_FIELDS.forEach(({ key }) => {
-      const v = knownPer100[key] ?? dbPer100[key] ?? 0;
-      scaled[key] = Math.round(v * factor * 10) / 10;
-    });
-    return { ...scaled, microAmounts: {}, bonus: [], estimatedKeys: [], estimatedGrams: Math.round(estimatedGrams), source: dbSource, matchedName: dbMatchedName, ok: false, notFound: !hasRealValues };
+  // AI behövs bara för det databasen inte kan svara på: gram för andra enheter, saknade fält, saknade vitaminer
+  const needsAi = !isGrams || missingKeys.length > 0 || !dbMicros100;
+  let parsed = null;
+  if (needsAi) {
+    try {
+      const system =
+        "Du är en näringsdatabas-assistent. Du får ett livsmedel/dryck, en mängd (ev. i annan enhet än gram) och ev. värden användaren redan känner till (per 100g/100ml). " +
+        "Svara ENDAST med ett JSON-objekt (ingen text, inga markdown-fences) i exakt detta format: " +
+        '{"estimated_grams": number, "per100": {"kcal": number, "protein_g": number, "carbs_g": number, "sugar_g": number, ' +
+        '"fiber_g": number, "fat_g": number, "satfat_g": number, "transfat_g": number}, ' +
+        `"micro_amounts": {${MICRO_KEYS.map((k) => `"${k}": number`).join(", ")}}, ` +
+        '"bonus": [{"name": string, "amount": string, "reason": string}]} ' +
+        "estimated_grams: din bästa uppskattning av hur många gram den angivna mängden motsvarar (för vätskor kan du anta ca 1g per ml; 1 dl = 100ml, 1 msk = 15ml, 1 tsk = 5ml, 1 kopp ≈ 240ml, för 'st' uppskatta en rimlig genomsnittlig vikt för det livsmedlet). " +
+        "Fyll endast i uppskattade värden (typ USDA FoodData Central, per 100g/100ml) för dessa fält i \"per100\", resten ignoreras ändå: " + JSON.stringify(missingKeys) + ". " +
+        "micro_amounts: uppskatta den faktiska mängden (i den enhet listan anger, µg eller mg) av VARJE nämnt ämne för hela portionen (redan skalat till estimated_grams), sätt 0 om livsmedlet inte innehåller nämnvärt av det — hoppa inte över några nycklar. " +
+        "bonus: 0-2 icke-essentiella men nyttiga ämnen om relevant (t.ex. omega-3, polyfenoler, antioxidanter), amount som kort textsträng (t.ex. \"620mg\"), reason en kort mening (max ~12 ord) om varför ämnet är bra för hälsan. Lämna tomt om inget relevant.";
+      const text = await callClaude(
+        [{ role: "user", content:
+          `Livsmedel/dryck: ${dbHit ? dbHit.name : name}\nAngiven mängd: ${amountStr} ${UNIT_LABELS[unit] || unit}\n` +
+          `Kända värden per 100g/100ml: ${JSON.stringify({ ...dbPer100, ...knownPer100 })}\n` +
+          `Nyckel → ämne (enhet): ${[...VITAMINS, ...MINERALS].map((m) => `${m.key}=${m.name}(${m.unit})`).join(", ")}` }],
+        system
+      );
+      parsed = parseJsonLoose(text);
+    } catch (e) {
+      parsed = null; // AI inte tillgänglig — vi använder bara riktiga värden
+    }
   }
+
+  const hasRealValues = Object.keys(knownPer100).length > 0 || Object.keys(dbPer100).length > 0;
+  if (!hasRealValues && !parsed) return { notFound: true };
+
+  const estimatedGrams = isGrams
+    ? Number(amountStr)
+    : (parsed?.estimated_grams || Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100));
+  const factor = estimatedGrams / 100;
+
+  const combinedPer100 = { ...(parsed?.per100 || {}), ...dbPer100, ...knownPer100 };
+  const scaled = {};
+  KNOWN_FIELDS.forEach(({ key }) => {
+    const v = combinedPer100[key];
+    scaled[key] = typeof v === "number" && v > 0 ? Math.round(v * factor * 10) / 10 : 0;
+  });
+
+  let microAmounts = {};
+  if (dbMicros100) {
+    Object.entries(dbMicros100).forEach(([k, v]) => { microAmounts[k] = Math.round(v * factor * 1000) / 1000; });
+  } else if (parsed?.micro_amounts) {
+    microAmounts = parsed.micro_amounts;
+  }
+
+  return {
+    ...scaled, microAmounts, bonus: parsed?.bonus || [],
+    estimatedKeys: parsed ? missingKeys : [],
+    estimatedGrams: Math.round(estimatedGrams),
+    source: dbHit ? dbHit.source : null, matchedName: dbHit ? dbHit.name : null,
+    ok: true, microsMissing: !dbMicros100 && !parsed?.micro_amounts,
+  };
 }
 
 export default function KarnaPrototype() {
@@ -602,6 +607,7 @@ export default function KarnaPrototype() {
   const [confirmed, setConfirmed] = useState(false);
   const [known100, setKnown100] = useState({}); // values the user knows, per 100g
   const [show100, setShow100] = useState(false);
+  const [candidates, setCandidates] = useState([]); // databasträffar att välja bland
 
   const ACTIVITY_MULT = { stillasittande: 1.2, lätt: 1.375, moderat: 1.55, aktiv: 1.725, "mycket aktiv": 1.9 };
 
@@ -740,23 +746,36 @@ export default function KarnaPrototype() {
     setMode("idle"); setFoodName(""); setWeight(""); setWeightUnit("g"); setPhotoDesc("");
     setPhotoData(null); setResult(null); setConfirmed(false);
     setChatOpen(false); setChatMsgs([]); setError("");
-    setKnown100({}); setShow100(false);
+    setKnown100({}); setShow100(false); setCandidates([]);
   }
 
   async function estimateManual() {
     if (!foodName.trim() || !weight.trim()) return;
+    setLoading(true); setError(""); setCandidates([]);
+    const lookup = await lookupFoodDatabase(foodName);
+    const results = lookup.results || [];
+    setLoading(false);
+    if (results.length > 0) {
+      setCandidates(results);
+      setMode("pick");
+      return;
+    }
+    await finishManual(null);
+  }
+
+  async function finishManual(hit) {
     setLoading(true); setError("");
-    const res = await estimateFoodValues(foodName, weight, weightUnit, known100);
+    const res = await estimateFoodValues(foodName, weight, weightUnit, known100, hit);
+    setLoading(false);
     if (res.notFound) {
       setError(`Hittade inte "${foodName}" i databasen. Kolla stavningen, prova ett annat ord eller engelska (t.ex. "chicken breast") — eller fyll i värdena från förpackningen här nedanför.`);
       setShow100(true);
-      setLoading(false);
+      setMode("manual");
       return;
     }
     setResult(res);
     setMode("result");
-    if (!res.ok) setError("Vitaminer och mineraler kunde inte räknas ut just nu (kräver AI). Makrovärdena kommer från databasen eller det du fyllt i.");
-    setLoading(false);
+    if (res.microsMissing) setError("Vitaminer och mineraler finns inte för den här träffen (och AI är inte aktiverad än), så de räknas inte med.");
   }
 
   async function estimatePhoto() {
@@ -1421,6 +1440,28 @@ export default function KarnaPrototype() {
               >
                 {loading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : null}
                 {loading ? "Räknar ut värden…" : "Logga"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* pick the right database hit */}
+        {mode === "pick" && (
+          <div className="fade-up" style={{ maxWidth: 480, margin: "20px auto" }}>
+            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>Vilken menar du?</p>
+            <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>
+              Träffar för "{foodName}" — värdena är per 100 g. Du väljer {weight} {UNIT_LABELS[weightUnit]} i nästa steg.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {candidates.map((c) => (
+                <CandidateButton key={c.id} c={c} disabled={loading} onPick={() => finishManual(c)} />
+              ))}
+            </div>
+            {loading && <p style={{ fontSize: 12, color: C.textDim, marginBottom: 12 }}>Räknar ut…</p>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setMode("manual")} style={ghostBtn}>Tillbaka</button>
+              <button onClick={() => finishManual(null)} disabled={loading} style={{ ...ghostBtn, flex: 1 }}>
+                Inget av dessa — fyll i själv
               </button>
             </div>
           </div>
@@ -2266,6 +2307,7 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
   const [ingShow100, setIngShow100] = useState(false);
   const [ingLoading, setIngLoading] = useState(false);
   const [ingError, setIngError] = useState("");
+  const [ingCandidates, setIngCandidates] = useState([]);
 
   const totals = ingredients.reduce((acc, ing) => {
     KNOWN_FIELDS.forEach(({ key }) => { acc[key] = (acc[key] || 0) + (ing[key] || 0); });
@@ -2274,8 +2316,20 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
 
   async function addIngredient() {
     if (!ingName.trim() || !ingWeight.trim()) return;
+    setIngLoading(true); setIngError(""); setIngCandidates([]);
+    const lookup = await lookupFoodDatabase(ingName);
+    const results = lookup.results || [];
+    setIngLoading(false);
+    if (results.length > 0) {
+      setIngCandidates(results);
+      return;
+    }
+    await finishIngredient(null);
+  }
+  async function finishIngredient(hit) {
     setIngLoading(true); setIngError("");
-    const res = await estimateFoodValues(ingName, ingWeight, ingUnit, ingKnown100);
+    const res = await estimateFoodValues(ingName, ingWeight, ingUnit, ingKnown100, hit);
+    setIngCandidates([]);
     if (res.notFound) {
       setIngError(`Hittade inte "${ingName}" i databasen. Kolla stavningen, prova engelska (t.ex. "chicken breast") eller fyll i värdena per 100g nedanför.`);
       setIngShow100(true);
@@ -2283,7 +2337,7 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
       return;
     }
     setIngredients((list) => [...list, { name: ingName, weight: ingWeight, unit: ingUnit, ...res }]);
-    if (!res.ok) setIngError("Ingrediensen är tillagd, men vitaminer och mineraler kunde inte räknas ut just nu (kräver AI).");
+    if (res.microsMissing) setIngError("Ingrediensen är tillagd, men vitaminer och mineraler saknas för den (AI är inte aktiverad än).");
     setIngName(""); setIngWeight(""); setIngUnit("g"); setIngKnown100({}); setIngShow100(false);
     setIngLoading(false);
     setAdding(false);
@@ -2415,8 +2469,21 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
             </div>
           )}
 
+          {ingCandidates.length > 0 && (
+            <div className="fade-up" style={{ marginTop: 12, marginBottom: 8 }}>
+              <p style={{ fontSize: 12, color: C.textDim, marginBottom: 8 }}>Vilken menar du? (värden per 100 g)</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {ingCandidates.map((c) => (
+                  <CandidateButton key={c.id} c={c} disabled={ingLoading} onPick={() => finishIngredient(c)} />
+                ))}
+                <button onClick={() => finishIngredient(null)} disabled={ingLoading} style={{ ...ghostBtn, width: "100%" }}>
+                  Inget av dessa — använd mina värden
+                </button>
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <button onClick={() => { setAdding(false); setIngName(""); setIngWeight(""); setIngError(""); }} style={ghostBtn}>Avbryt</button>
+            <button onClick={() => { setAdding(false); setIngName(""); setIngWeight(""); setIngError(""); setIngCandidates([]); }} style={ghostBtn}>Avbryt</button>
             <button
               onClick={addIngredient} disabled={!ingName.trim() || !ingWeight.trim() || ingLoading}
               style={{ ...primaryBtn, opacity: !ingName.trim() || !ingWeight.trim() ? 0.5 : 1 }}
@@ -2731,6 +2798,28 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
         <p style={{ fontSize: 11, color: "#E08F8F", marginTop: -12, marginBottom: 20 }}>{photoError}</p>
       )}
     </div>
+  );
+}
+
+function CandidateButton({ c, onPick, disabled }) {
+  const src = c.source === "USDA FoodData Central" ? "USDA" : c.source;
+  return (
+    <button
+      onClick={onPick} disabled={disabled}
+      style={{
+        ...glass, borderRadius: 14, padding: "12px 16px", textAlign: "left", cursor: disabled ? "default" : "pointer",
+        color: C.text, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, width: "100%",
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, marginBottom: 3 }}>{c.name}</div>
+        <div style={{ fontSize: 10.5, color: C.textFaint }}>
+          {src}{c.brand ? ` · ${c.brand}` : ""} · P {Math.round(c.per100.protein_g)}g · K {Math.round(c.per100.carbs_g)}g · F {Math.round(c.per100.fat_g)}g
+          {c.micros100 && Object.keys(c.micros100).length ? " · vitaminer ✓" : ""}
+        </div>
+      </div>
+      <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(c.per100.kcal)} kcal</span>
+    </button>
   );
 }
 
