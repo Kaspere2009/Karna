@@ -2112,6 +2112,9 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
           <p style={{ fontSize: 12.5, color: C.textDim, marginTop: 14, maxWidth: 260, marginLeft: "auto", marginRight: "auto" }}>
             Mår kärnan bra, mår hela kroppen bra.
           </p>
+          <p style={{ fontSize: 11, color: C.textFaint, marginTop: 24, maxWidth: 320, marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
+            Näringsdata: Livsmedelsverkets livsmedelsdatabas (Livsmedelsverket, CC BY 4.0), USDA FoodData Central och Open Food Facts (ODbL).
+          </p>
         </div>
       </div>
     );
@@ -2802,7 +2805,7 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
 }
 
 function CandidateButton({ c, onPick, disabled }) {
-  const src = c.source === "USDA FoodData Central" ? "USDA" : c.source;
+  const src = c.source === "USDA FoodData Central" ? "USDA" : c.source === "Livsmedelsverkets livsmedelsdatabas" ? "Livsmedelsverket" : c.source;
   return (
     <button
       onClick={onPick} disabled={disabled}
