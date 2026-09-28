@@ -1,6 +1,32 @@
 // Söker livsmedel och returnerar en LISTA med träffar som användaren väljer bland.
-// USDA FoodData Central (vanliga råvaror, med vitaminer & mineraler) + Open Food Facts (märkesvaror).
-// Vanliga svenska ord översätts till engelska med en inbyggd ordlista innan USDA-sökningen.
+// 1. Vår egen tabell i Supabase (Livsmedelsverket + USDA, sökning som tål stavfel)
+// 2. Om tabellen inte gav något: direkt mot USDA (reserv, t.ex. innan importen är gjord)
+// 3. Open Food Facts för märkesvaror läggs alltid till sist.
+
+const SUPABASE_URL = "https://clwdczzwsvowsfpaijjm.supabase.co";
+const SUPABASE_KEY = "sb_publishable_DJZHyFLJcCW3Ii4HlXgjOw_rbEZkh4s"; // publik nyckel, samma som i appen
+const SOURCE_LABELS = { slv: "Livsmedelsverkets livsmedelsdatabas", usda: "USDA FoodData Central" };
+
+async function searchOwnTable(term, country) {
+  const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/search_foods`, 6000, {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ q: term, p_country: country || null, p_limit: 12 }),
+  });
+  if (!res.ok) return [];
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : []).map((r) => ({
+    id: r.id,
+    source: SOURCE_LABELS[r.source] || r.source,
+    name: r.name_sv || r.name_en,
+    per100: {
+      kcal: Number(r.kcal) || 0, protein_g: Number(r.protein_g) || 0, carbs_g: Number(r.carbs_g) || 0,
+      sugar_g: Number(r.sugar_g) || 0, fiber_g: Number(r.fiber_g) || 0, fat_g: Number(r.fat_g) || 0,
+      satfat_g: Number(r.satfat_g) || 0, transfat_g: Number(r.transfat_g) || 0,
+    },
+    micros100: r.micros && Object.keys(r.micros).length ? r.micros : null,
+  }));
+}
 
 // ---------- svenska → engelska (vanliga livsmedel) ----------
 const SV_TO_EN = {
@@ -87,10 +113,10 @@ function convertMass(value, fromUnit, toUnit) {
 const round = (n, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
 const nonNeg = (n) => (typeof n === "number" && n > 0 ? n : 0); // USDA kan ge t.ex. -0.4 g kolhydrater
 
-function fetchWithTimeout(url, ms = 7000) {
+function fetchWithTimeout(url, ms = 7000, options = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
-  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+  return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(timer));
 }
 
 // ---------- USDA ----------
@@ -224,20 +250,26 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-  const { query } = req.body || {};
+  const { query, country } = req.body || {};
   if (!query || !query.trim()) {
     return res.status(400).json({ error: "Ingen sökterm angiven." });
   }
 
-  const original = query.trim().toLowerCase();
-  const english = SV_TO_EN[original] || original;
+  // bara bokstäver, siffror och mellanslag (skyddar sökningen i databasen)
+  const original = query.trim().toLowerCase().replace(/[^\p{L}\p{N} %]/gu, " ").replace(/\s+/g, " ").trim();
+  if (!original) return res.status(200).json({ results: [] });
 
-  // båda databaserna söks samtidigt; USDA-träffarna visas först
-  const [usda, off] = await Promise.allSettled([searchUsda(english), searchOpenFoodFacts(original)]);
-  const results = [
-    ...(usda.status === "fulfilled" ? usda.value : []),
-    ...(off.status === "fulfilled" ? off.value : []),
-  ];
+  const [own, off] = await Promise.allSettled([
+    searchOwnTable(original, country),
+    searchOpenFoodFacts(original),
+  ]);
+  let base = own.status === "fulfilled" ? own.value : [];
 
+  // reserv: tabellen tom eller ingen träff → sök direkt hos USDA som förut
+  if (base.length === 0) {
+    try { base = await searchUsda(SV_TO_EN[original] || original); } catch (e) { base = []; }
+  }
+
+  const results = [...base, ...(off.status === "fulfilled" ? off.value : [])];
   return res.status(200).json({ results });
 }
