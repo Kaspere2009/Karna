@@ -70,7 +70,21 @@ const SLV_MICROS = {
   FOL: ["b9", "µg"], VITB12: ["b12", "µg"],
   CA: ["calcium", "mg"], FE: ["iron", "mg"], MG: ["magnesium", "mg"], K: ["potassium", "mg"], P: ["phosphorus", "mg"],
   ZN: ["zinc", "mg"], SE: ["selenium", "µg"], ID: ["iodine", "µg"], NA: ["sodium", "mg"],
+  // "bra ämnen"
+  "F20:5": ["epa", "mg"], "F22:6": ["dha", "mg"], "F18:3": ["ala", "mg"],
+  CARTBTOT: ["beta_carotene", "µg"], CARTB: ["beta_carotene", "µg"], WHOLET: ["wholegrain", "g"],
 };
+
+// slår ihop fettsyrorna till omega-3 (ALA + EPA + DHA) och EPA + DHA
+function finishBonus(micros) {
+  const { epa, dha, ala } = micros;
+  if (epa !== undefined || dha !== undefined || ala !== undefined) {
+    micros.omega3 = round((epa || 0) + (dha || 0) + (ala || 0));
+    micros.epa_dha = round((epa || 0) + (dha || 0));
+  }
+  delete micros.epa; delete micros.dha; delete micros.ala;
+  return micros;
+}
 
 function slvRow(nummer, nameSv, nameEn, naringsvarden) {
   const row = {
@@ -92,6 +106,7 @@ function slvRow(nummer, nameSv, nameEn, naringsvarden) {
       if (v !== null && v >= 0 && row.micros[key] === undefined) row.micros[key] = round(v);
     }
   }
+  finishBonus(row.micros);
   return row;
 }
 
@@ -124,6 +139,9 @@ const USDA_MICROS = {
   "301": ["calcium", "mg"], "303": ["iron", "mg"], "304": ["magnesium", "mg"], "305": ["phosphorus", "mg"],
   "306": ["potassium", "mg"], "307": ["sodium", "mg"], "309": ["zinc", "mg"], "312": ["copper", "mg"],
   "315": ["manganese", "mg"], "317": ["selenium", "µg"], "313": ["fluoride", "mg"],
+  // "bra ämnen"
+  "629": ["epa", "mg"], "621": ["dha", "mg"], "851": ["ala", "mg"], "619": ["ala", "mg"],
+  "321": ["beta_carotene", "µg"], "337": ["lycopene", "µg"], "338": ["lutein", "µg"],
 };
 
 function usdaRow(food) {
@@ -144,9 +162,10 @@ function usdaRow(food) {
     else if (USDA_MICROS[num]) {
       const [key, appUnit] = USDA_MICROS[num];
       const v = convertMass(value, unit, appUnit);
-      if (v !== null && v >= 0) row.micros[key] = round(v);
+      if (v !== null && v >= 0 && (row.micros[key] === undefined || num !== "619")) row.micros[key] = round(v);
     }
   }
+  finishBonus(row.micros);
   return row;
 }
 
