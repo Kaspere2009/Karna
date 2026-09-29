@@ -169,12 +169,38 @@ function usdaRow(food) {
   return row;
 }
 
+// USDA:s lista skickar en förkortad version utan fettsyror/karotenoider — de hämtas separat, 20 livsmedel per anrop
+const USDA_BONUS_NUMBERS = [629, 621, 851, 619, 321, 337, 338];
+
+async function fetchUsdaBonus(ids, key) {
+  const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods?api_key=${key}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fdcIds: ids, format: "abridged", nutrients: USDA_BONUS_NUMBERS }),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
 async function importUsda(page) {
   const key = process.env.USDA_API_KEY || "DEMO_KEY";
   const data = await getJson(
     `https://api.nal.usda.gov/fdc/v1/foods/list?dataType=SR%20Legacy&pageSize=${USDA_PAGE}&pageNumber=${page}&api_key=${key}`
   );
   const foods = Array.isArray(data) ? data : [];
+
+  // komplettera varje livsmedel med omega-3, betakaroten, lykopen och lutein
+  const ids = foods.filter((f) => f.fdcId).map((f) => f.fdcId);
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
+  const extra = (await mapLimit(chunks, 5, (c) => fetchUsdaBonus(c, key).catch(() => []))).flat();
+  const extraById = new Map(extra.map((f) => [f.fdcId, f.foodNutrients || []]));
+  foods.forEach((f) => {
+    const more = extraById.get(f.fdcId);
+    if (more && more.length) f.foodNutrients = [...(f.foodNutrients || []), ...more];
+  });
+
   const rows = foods.filter((f) => f.fdcId && f.description).map(usdaRow);
   if (rows.length) await upsertFoods(rows);
   return { imported: rows.length, nextCursor: page + 1, done: foods.length < USDA_PAGE };
