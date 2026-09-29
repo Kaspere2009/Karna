@@ -54,7 +54,21 @@ const SV_TO_EN = {
   "olivolja": "olive oil", "rapsolja": "canola oil", "socker": "sugar", "honung": "honey",
   "choklad": "chocolate", "mörk choklad": "dark chocolate", "kaffe": "coffee brewed",
   "te": "tea brewed", "apelsinjuice": "orange juice", "tofu": "tofu",
+  "grönt te": "tea green", "grön te": "tea green", "svart te": "tea black",
 };
+
+// enskilda ord, så att även kombinationer som inte finns i listan ovan kan översättas ord för ord
+const SV_WORDS = {
+  "te": "tea", "grön": "green", "grönt": "green", "gröna": "green", "svart": "black", "vit": "white", "vitt": "white",
+  "röd": "red", "rött": "red", "gul": "yellow", "kokt": "cooked", "kokta": "cooked", "rå": "raw", "råa": "raw",
+  "stekt": "fried", "grillad": "grilled", "ugnsbakad": "baked", "rökt": "smoked", "torkad": "dried", "fryst": "frozen",
+  "juice": "juice", "saft": "juice", "mjöl": "flour", "olja": "oil", "sås": "sauce", "soppa": "soup",
+  "bröst": "breast", "lår": "thigh", "färs": "ground", "filé": "fillet", "file": "fillet",
+};
+function toEnglish(text) {
+  if (SV_TO_EN[text]) return SV_TO_EN[text];
+  return text.split(" ").map((w) => SV_WORDS[w] || SV_TO_EN[w] || w).join(" ");
+}
 
 const PROCESSED = /(dried|dehydrated|powder|chips|juice|canned|cooked|boiled|frozen|fried|roasted|breaded|smoked)/i;
 const DISH = /(salad|soup|sandwich|nuggets|patties|spread|baby food|restaurant|fast food|pie|casserole|stew)/i;
@@ -259,15 +273,22 @@ export default async function handler(req, res) {
   const original = query.trim().toLowerCase().replace(/[^\p{L}\p{N} %]/gu, " ").replace(/\s+/g, " ").trim();
   if (!original) return res.status(200).json({ results: [] });
 
-  const [own, off] = await Promise.allSettled([
+  // sök på det användaren skrev, och samtidigt på en engelsk översättning (för USDA:s internationella livsmedel)
+  const english = toEnglish(original);
+  const [own, ownEn, off] = await Promise.allSettled([
     searchOwnTable(original, country),
+    english !== original ? searchOwnTable(english, country) : Promise.resolve([]),
     searchOpenFoodFacts(original),
   ]);
-  let base = own.status === "fulfilled" ? own.value : [];
+  const seen = new Set();
+  let base = [
+    ...(own.status === "fulfilled" ? own.value : []),
+    ...(ownEn.status === "fulfilled" ? ownEn.value : []).slice(0, 5),
+  ].filter((r) => (seen.has(r.id) ? false : seen.add(r.id)));
 
   // reserv: tabellen tom eller ingen träff → sök direkt hos USDA som förut
   if (base.length === 0) {
-    try { base = await searchUsda(SV_TO_EN[original] || original); } catch (e) { base = []; }
+    try { base = await searchUsda(english); } catch (e) { base = []; }
   }
 
   const results = [...base, ...(off.status === "fulfilled" ? off.value : [])];
