@@ -428,9 +428,40 @@ async function loadChoices(session, query) {
       accessToken: session.access_token,
       params: { user_id: `eq.${session.user.id}`, query: `eq.${query}`, select: "*", order: "last_used.desc", limit: "3" },
     });
-    return (rows || []).map((r) => ({ ...r.food, remembered: true, useCount: r.use_count }));
+    const list = (rows || []).map((r) => ({ ...r.food, remembered: true, useCount: r.use_count }));
+    return await refreshRemembered(session, list);
   } catch (e) {
     return [];
+  }
+}
+
+// hämtar sparade val färskt från vår livsmedelstabell via id, så att gamla kopior aldrig används
+const FOOD_SOURCE_LABELS = { slv: "Livsmedelsverkets livsmedelsdatabas", usda: "USDA FoodData Central" };
+function foodRowToCandidate(r) {
+  return {
+    id: r.id,
+    source: FOOD_SOURCE_LABELS[r.source] || r.source,
+    name: r.name_sv || r.name_en,
+    per100: {
+      kcal: Number(r.kcal) || 0, protein_g: Number(r.protein_g) || 0, carbs_g: Number(r.carbs_g) || 0,
+      sugar_g: Number(r.sugar_g) || 0, fiber_g: Number(r.fiber_g) || 0, fat_g: Number(r.fat_g) || 0,
+      satfat_g: Number(r.satfat_g) || 0, transfat_g: Number(r.transfat_g) || 0,
+    },
+    micros100: r.micros && Object.keys(r.micros).length ? r.micros : null,
+  };
+}
+async function refreshRemembered(session, remembered) {
+  const ids = remembered.map((r) => r.id).filter((id) => /^(slv|usda)-/.test(id || ""));
+  if (!ids.length) return remembered;
+  try {
+    const rows = await supabaseRest("foods", {
+      accessToken: session.access_token,
+      params: { id: `in.(${ids.join(",")})`, select: "*" },
+    });
+    const byId = new Map((rows || []).map((r) => [r.id, foodRowToCandidate(r)]));
+    return remembered.map((r) => (byId.has(r.id) ? { ...byId.get(r.id), remembered: true, useCount: r.useCount } : r));
+  } catch (e) {
+    return remembered;
   }
 }
 function saveChoice(session, query, hit) {
@@ -441,9 +472,12 @@ function saveChoice(session, query, hit) {
     body: { user_id: session.user.id, query, food_id: food.id, food, use_count: (useCount || 0) + 1, last_used: new Date().toISOString() },
   }).catch((e) => console.error("Kunde inte spara valet:", e.message));
 }
+// minnet säger VILKEN träff du vill ha — värdena tas alltid färska från sökningen om träffen finns där
 function mergeCandidates(remembered, results) {
-  const seen = new Set(remembered.map((r) => r.id));
-  return [...remembered, ...(results || []).filter((r) => !seen.has(r.id))];
+  const fresh = new Map((results || []).map((r) => [r.id, r]));
+  const rem = remembered.map((r) => (fresh.has(r.id) ? { ...fresh.get(r.id), remembered: true, useCount: r.useCount } : r));
+  const seen = new Set(rem.map((r) => r.id));
+  return [...rem, ...(results || []).filter((r) => !seen.has(r.id))];
 }
 
 async function lookupFoodDatabase(name) {
@@ -853,7 +887,7 @@ export default function KarnaPrototype() {
     const ctx = { name, amount, unit };
     if (merged.length === 0) { await finishManual(null, ctx); return; }
     // har du valt något för exakt den här sökningen förut → använd det direkt (du kan byta träff efteråt)
-    if (remembered.length > 0) { await finishManual(remembered[0], ctx); return; }
+    if (remembered.length > 0) { await finishManual(merged[0], ctx); return; }
     setMode("pick");
   }
 
