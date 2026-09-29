@@ -379,6 +379,73 @@ const UNITS = [
 const UNIT_LABELS = Object.fromEntries(UNITS.map((u) => [u.v, u.l]));
 const FALLBACK_UNIT_GRAMS = { g: 1, ml: 1, dl: 100, msk: 15, tsk: 5, kopp: 240, st: 100 };
 
+// ---------- "150 g ris", "2 kiwi", "ris 150g" → namn + mängd + enhet ----------
+const UNIT_WORDS = "kg|gram|gr|g|ml|cl|dl|l|msk|tsk|koppar|kopp|stycken|styck|st";
+const UNIT_MAP = { g: "g", gr: "g", gram: "g", kg: "kg", ml: "ml", cl: "cl", dl: "dl", l: "l", msk: "msk", tsk: "tsk", kopp: "kopp", koppar: "kopp", st: "st", styck: "st", stycken: "st" };
+
+function parseFoodInput(text) {
+  const t = text.trim().toLowerCase().replace(/(\d),(\d)/g, "$1.$2");
+  let m = t.match(new RegExp(`^(\\d+(?:\\.\\d+)?)\\s*(${UNIT_WORDS})?\\b\\s*(.+)$`));
+  let amount, unit, name;
+  if (m) { amount = m[1]; unit = m[2]; name = m[3]; }
+  else {
+    m = t.match(new RegExp(`^(.+?)\\s+(\\d+(?:\\.\\d+)?)\\s*(${UNIT_WORDS})?$`));
+    if (!m) return null;
+    name = m[1]; amount = m[2]; unit = m[3];
+  }
+  let n = Number(amount);
+  let u = UNIT_MAP[unit] || "st";
+  if (u === "kg") { n *= 1000; u = "g"; }
+  if (u === "l") { n *= 1000; u = "ml"; }
+  if (u === "cl") { n *= 10; u = "ml"; }
+  name = name.trim();
+  if (!name || !n) return null;
+  return { name, amount: n, unit: u };
+}
+
+// ungefärlig vikt för "1 st" av vanliga livsmedel (gram). Längre ord först så att t.ex. "körsbärstomat" går före "tomat".
+const PIECE_GRAMS = [
+  ["körsbärstomat", 15], ["sötpotatis", 200], ["vitlöksklyfta", 5], ["knäckebröd", 12], ["brödskiva", 35],
+  ["skiva bröd", 35], ["kycklingfilé", 130], ["mandarin", 70], ["clementin", 70], ["nektarin", 140],
+  ["persik", 150], ["plommon", 60], ["apelsin", 150], ["avokado", 150], ["paprik", 150], ["potatis", 100],
+  ["riskak", 8], ["jordgubb", 12], ["banan", 120], ["äppl", 150], ["päron", 170], ["tomat", 90],
+  ["morot", 70], ["morötter", 70], ["citron", 100], ["gurk", 350], ["dadel", 8], ["dadlar", 8], ["fikon", 50], ["kiwi", 75], ["lime", 65],
+  ["lök", 100], ["ägg", 60], ["kex", 10],
+];
+function pieceGrams(name) {
+  const hit = PIECE_GRAMS.find(([word]) => name.includes(word));
+  return hit ? hit[1] : null;
+}
+
+// ---------- minne: vilken träff du valde för en viss sökning ----------
+function normalizeQuery(q) {
+  return (q || "").toLowerCase().normalize("NFC").replace(/\s+/g, " ").trim();
+}
+async function loadChoices(session, query) {
+  if (!session || !query) return [];
+  try {
+    const rows = await supabaseRest("food_choices", {
+      accessToken: session.access_token,
+      params: { user_id: `eq.${session.user.id}`, query: `eq.${query}`, select: "*", order: "last_used.desc", limit: "3" },
+    });
+    return (rows || []).map((r) => ({ ...r.food, remembered: true, useCount: r.use_count }));
+  } catch (e) {
+    return [];
+  }
+}
+function saveChoice(session, query, hit) {
+  if (!session || !query || !hit || !hit.id) return;
+  const { remembered, useCount, ...food } = hit;
+  supabaseRest("food_choices", {
+    method: "POST", upsert: true, accessToken: session.access_token,
+    body: { user_id: session.user.id, query, food_id: food.id, food, use_count: (useCount || 0) + 1, last_used: new Date().toISOString() },
+  }).catch((e) => console.error("Kunde inte spara valet:", e.message));
+}
+function mergeCandidates(remembered, results) {
+  const seen = new Set(remembered.map((r) => r.id));
+  return [...remembered, ...(results || []).filter((r) => !seen.has(r.id))];
+}
+
 async function lookupFoodDatabase(name) {
   try {
     const res = await fetch("/api/food-lookup", {
@@ -750,29 +817,60 @@ export default function KarnaPrototype() {
   }
 
   async function estimateManual() {
-    if (!foodName.trim() || !weight.trim()) return;
-    setLoading(true); setError(""); setCandidates([]);
-    const lookup = await lookupFoodDatabase(foodName);
-    const results = lookup.results || [];
-    setLoading(false);
-    if (results.length > 0) {
-      setCandidates(results);
-      setMode("pick");
+    let name = foodName.trim();
+    let amount = weight.trim();
+    let unit = weightUnit;
+    const parsed = parseFoodInput(name);
+    if (parsed) {
+      name = parsed.name;
+      if (parsed.unit === "st") {
+        const pg = pieceGrams(parsed.name);
+        if (!pg) {
+          setFoodName(name); setWeight(""); setWeightUnit("g");
+          setError(`Jag vet inte hur mycket en "${name}" väger ungefär — skriv mängden i gram i fältet här nedanför.`);
+          return;
+        }
+        amount = String(Math.round(parsed.amount * pg));
+        unit = "g";
+      } else {
+        amount = String(parsed.amount);
+        unit = parsed.unit;
+      }
+      setFoodName(name); setWeight(amount); setWeightUnit(unit);
+    }
+    if (!name) return;
+    if (!amount) {
+      setError('Skriv hur mycket, t.ex. "150 g ris" eller "2 kiwi" — eller fyll i mängden här nedanför.');
       return;
     }
-    await finishManual(null);
+
+    setLoading(true); setError(""); setCandidates([]);
+    const query = normalizeQuery(name);
+    const [lookup, remembered] = await Promise.all([lookupFoodDatabase(name), loadChoices(session, query)]);
+    const merged = mergeCandidates(remembered, lookup.results);
+    setLoading(false);
+    setCandidates(merged);
+    const ctx = { name, amount, unit };
+    if (merged.length === 0) { await finishManual(null, ctx); return; }
+    // har du valt något för exakt den här sökningen förut → använd det direkt (du kan byta träff efteråt)
+    if (remembered.length > 0) { await finishManual(remembered[0], ctx); return; }
+    setMode("pick");
   }
 
-  async function finishManual(hit) {
-    setLoading(true); setError("");
-    const res = await estimateFoodValues(foodName, weight, weightUnit, known100, hit);
+  async function finishManual(hit, ctx = null) {
+    const name = ctx ? ctx.name : foodName;
+    const amount = ctx ? ctx.amount : weight;
+    const unit = ctx ? ctx.unit : weightUnit;
+    setLoading(true); setError(""); setConfirmed(false);
+    const res = await estimateFoodValues(name, amount, unit, known100, hit);
     setLoading(false);
     if (res.notFound) {
-      setError(`Hittade inte "${foodName}" i databasen. Kolla stavningen, prova ett annat ord eller engelska (t.ex. "chicken breast") — eller fyll i värdena från förpackningen här nedanför.`);
+      setError(`Hittade inte "${name}" i databasen. Kolla stavningen, prova ett annat ord eller engelska (t.ex. "chicken breast") — eller fyll i värdena från förpackningen här nedanför.`);
       setShow100(true);
       setMode("manual");
       return;
     }
+    if (hit) saveChoice(session, normalizeQuery(name), hit);
     setResult(res);
     setMode("result");
     if (res.microsMissing) setError("Vitaminer och mineraler finns inte för den här träffen (och AI är inte aktiverad än), så de räknas inte med.");
@@ -1153,6 +1251,7 @@ export default function KarnaPrototype() {
                   supabaseRest("daily_logs", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
                   supabaseRest("day_info", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
                   supabaseRest("saved_meals", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
+                  supabaseRest("food_choices", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
                   supabaseRest("profiles", { method: "DELETE", accessToken: session.access_token, params: { id: `eq.${uid}` } }),
                 ]);
               } catch (e) { console.error("Kunde inte radera all data:", e.message); }
@@ -1199,7 +1298,7 @@ export default function KarnaPrototype() {
 
       {page === "meal-builder" && (
         <MealBuilderPage
-          mealName={mealName} setMealName={setMealName}
+          mealName={mealName} setMealName={setMealName} session={session}
           ingredients={mealIngredients} setIngredients={setMealIngredients}
           onCancel={() => setPage("meals")}
           onSave={async (meal) => {
@@ -1343,7 +1442,7 @@ export default function KarnaPrototype() {
             <label style={{ fontSize: 12.5, color: C.textDim, display: "block", marginBottom: 6 }}>Matvara</label>
             <input
               value={foodName} onChange={(e) => setFoodName(e.target.value)}
-              placeholder="t.ex. banan"
+              placeholder='t.ex. "150 g ris" eller "2 kiwi"'
               style={{
                 width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
                 padding: "10px 12px", color: C.text, fontSize: 14, marginBottom: 16, outline: "none",
@@ -1435,8 +1534,8 @@ export default function KarnaPrototype() {
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => { setMode("choose"); setError(""); }} style={ghostBtn}>Tillbaka</button>
               <button
-                onClick={estimateManual} disabled={!foodName.trim() || !weight.trim() || loading}
-                style={{ ...primaryBtn, opacity: !foodName.trim() || !weight.trim() ? 0.5 : 1 }}
+                onClick={estimateManual} disabled={!foodName.trim() || loading}
+                style={{ ...primaryBtn, opacity: !foodName.trim() ? 0.5 : 1 }}
               >
                 {loading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : null}
                 {loading ? "Räknar ut värden…" : "Logga"}
@@ -1450,7 +1549,7 @@ export default function KarnaPrototype() {
           <div className="fade-up" style={{ maxWidth: 480, margin: "20px auto" }}>
             <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>Vilken menar du?</p>
             <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>
-              Träffar för "{foodName}" — värdena är per 100 g. Du väljer {weight} {UNIT_LABELS[weightUnit]} i nästa steg.
+              Träffar för "{foodName}" — värdena är per 100 g. Du loggar {weight} {UNIT_LABELS[weightUnit]}.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
               {candidates.map((c) => (
@@ -1528,6 +1627,14 @@ export default function KarnaPrototype() {
                     <div style={{ fontSize: 10.5, color: C.accent, marginTop: 3 }}>
                       Källa: {result.source}{result.matchedName ? ` · Träff: "${result.matchedName}"` : ""}
                     </div>
+                  )}
+                  {candidates.length > 1 && (
+                    <button
+                      onClick={() => { setMode("pick"); setConfirmed(false); setError(""); }}
+                      style={{ background: "none", border: "none", color: C.accent, fontSize: 11.5, cursor: "pointer", padding: 0, marginTop: 6, textDecoration: "underline" }}
+                    >
+                      Byt träff
+                    </button>
                   )}
                 </div>
                 <div style={{ ...mono, fontSize: 22, fontWeight: 600, color: C.accent }}>
@@ -2301,7 +2408,7 @@ function HistoryPage({ dayFoodLogs, weekLog, units = { weight: "kg", height: "cm
   );
 }
 
-function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, onCancel, onSave }) {
+function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, onCancel, onSave, session }) {
   const [adding, setAdding] = useState(ingredients.length === 0);
   const [ingName, setIngName] = useState("");
   const [ingWeight, setIngWeight] = useState("");
@@ -2320,8 +2427,8 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
   async function addIngredient() {
     if (!ingName.trim() || !ingWeight.trim()) return;
     setIngLoading(true); setIngError(""); setIngCandidates([]);
-    const lookup = await lookupFoodDatabase(ingName);
-    const results = lookup.results || [];
+    const [lookup, remembered] = await Promise.all([lookupFoodDatabase(ingName), loadChoices(session, normalizeQuery(ingName))]);
+    const results = mergeCandidates(remembered, lookup.results);
     setIngLoading(false);
     if (results.length > 0) {
       setIngCandidates(results);
@@ -2339,6 +2446,7 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
       setIngLoading(false);
       return;
     }
+    if (hit) saveChoice(session, normalizeQuery(ingName), hit);
     setIngredients((list) => [...list, { name: ingName, weight: ingWeight, unit: ingUnit, ...res }]);
     if (res.microsMissing) setIngError("Ingrediensen är tillagd, men vitaminer och mineraler saknas för den (AI är inte aktiverad än).");
     setIngName(""); setIngWeight(""); setIngUnit("g"); setIngKnown100({}); setIngShow100(false);
@@ -2819,6 +2927,7 @@ function CandidateButton({ c, onPick, disabled }) {
         <div style={{ fontSize: 10.5, color: C.textFaint }}>
           {src}{c.brand ? ` · ${c.brand}` : ""} · P {Math.round(c.per100.protein_g)}g · K {Math.round(c.per100.carbs_g)}g · F {Math.round(c.per100.fat_g)}g
           {c.micros100 && Object.keys(c.micros100).length ? " · vitaminer ✓" : ""}
+          {c.remembered ? <span style={{ color: C.estimate }}> · ditt val</span> : null}
         </div>
       </div>
       <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(c.per100.kcal)} kcal</span>
