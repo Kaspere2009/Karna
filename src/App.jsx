@@ -438,16 +438,18 @@ async function loadChoices(session, query) {
 // hämtar sparade val färskt från vår livsmedelstabell via id, så att gamla kopior aldrig används
 const FOOD_SOURCE_LABELS = { slv: "Livsmedelsverkets livsmedelsdatabas", usda: "USDA FoodData Central" };
 function foodRowToCandidate(r) {
+  const extra = r.extra_micros && Object.keys(r.extra_micros).length ? r.extra_micros : null;
+  const micros = { ...(extra || {}), ...(r.micros || {}) };
   return {
     id: r.id,
-    source: FOOD_SOURCE_LABELS[r.source] || r.source,
+    source: (FOOD_SOURCE_LABELS[r.source] || r.source) + (extra ? ", kompletterat med USDA FoodData Central" : ""),
     name: r.name_sv || r.name_en,
     per100: {
       kcal: Number(r.kcal) || 0, protein_g: Number(r.protein_g) || 0, carbs_g: Number(r.carbs_g) || 0,
       sugar_g: Number(r.sugar_g) || 0, fiber_g: Number(r.fiber_g) || 0, fat_g: Number(r.fat_g) || 0,
       satfat_g: Number(r.satfat_g) || 0, transfat_g: Number(r.transfat_g) || 0,
     },
-    micros100: r.micros && Object.keys(r.micros).length ? r.micros : null,
+    micros100: Object.keys(micros).length ? micros : null,
   };
 }
 async function refreshRemembered(session, remembered) {
@@ -2967,7 +2969,7 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
 }
 
 function CandidateButton({ c, onPick, disabled }) {
-  const src = c.source === "USDA FoodData Central" ? "USDA" : c.source === "Livsmedelsverkets livsmedelsdatabas" ? "Livsmedelsverket" : c.source;
+  const src = c.source === "Open Food Facts" ? `Märkesvara${c.brand ? ` · ${c.brand}` : ""}` : null;
   return (
     <button
       onClick={onPick} disabled={disabled}
@@ -2979,8 +2981,7 @@ function CandidateButton({ c, onPick, disabled }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13.5, marginBottom: 3 }}>{c.name}</div>
         <div style={{ fontSize: 10.5, color: C.textFaint }}>
-          {src}{c.brand ? ` · ${c.brand}` : ""} · P {Math.round(c.per100.protein_g)}g · K {Math.round(c.per100.carbs_g)}g · F {Math.round(c.per100.fat_g)}g
-          {c.micros100 && Object.keys(c.micros100).length ? " · vitaminer ✓" : ""}
+          {src ? `${src} · ` : ""}P {Math.round(c.per100.protein_g)}g · K {Math.round(c.per100.carbs_g)}g · F {Math.round(c.per100.fat_g)}g
           {c.remembered ? <span style={{ color: C.estimate }}> · ditt val</span> : null}
         </div>
       </div>
