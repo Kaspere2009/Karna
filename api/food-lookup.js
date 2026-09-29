@@ -113,9 +113,10 @@ const OFF_MICROS = {
   potassium: ["potassium"], phosphorus: ["phosphorus"], selenium: ["selenium"],
   copper: ["copper"], manganese: ["manganese"], iodine: ["iodine"], sodium: ["sodium"],
   chloride: ["chloride"], chromium: ["chromium"], molybdenum: ["molybdenum"], fluoride: ["fluoride"],
+  omega3: ["omega-3-fat"],
 };
 const APP_UNITS = Object.fromEntries(Object.entries(USDA_MICROS).map(([k, v]) => [k, v.unit]));
-Object.assign(APP_UNITS, { chloride: "mg", chromium: "µg", molybdenum: "µg" });
+Object.assign(APP_UNITS, { chloride: "mg", chromium: "µg", molybdenum: "µg", omega3: "mg" });
 
 const TO_MG = { G: 1000, MG: 1, UG: 0.001, "µG": 0.001 };
 function convertMass(value, fromUnit, toUnit) {
