@@ -15,17 +15,21 @@ async function searchOwnTable(term, country) {
   });
   if (!res.ok) return [];
   const rows = await res.json();
-  return (Array.isArray(rows) ? rows : []).map((r) => ({
+  return (Array.isArray(rows) ? rows : []).map((r) => {
+    const extra = r.extra_micros && Object.keys(r.extra_micros).length ? r.extra_micros : null;
+    const micros = { ...(extra || {}), ...(r.micros || {}) }; // källans egna värden går alltid först
+    return {
     id: r.id,
-    source: SOURCE_LABELS[r.source] || r.source,
+    source: (SOURCE_LABELS[r.source] || r.source) + (extra ? ", kompletterat med USDA FoodData Central" : ""),
     name: r.name_sv || r.name_en,
     per100: {
       kcal: Number(r.kcal) || 0, protein_g: Number(r.protein_g) || 0, carbs_g: Number(r.carbs_g) || 0,
       sugar_g: Number(r.sugar_g) || 0, fiber_g: Number(r.fiber_g) || 0, fat_g: Number(r.fat_g) || 0,
       satfat_g: Number(r.satfat_g) || 0, transfat_g: Number(r.transfat_g) || 0,
     },
-    micros100: r.micros && Object.keys(r.micros).length ? r.micros : null,
-  }));
+    micros100: Object.keys(micros).length ? micros : null,
+    };
+  });
 }
 
 // ---------- svenska → engelska (vanliga livsmedel) ----------
