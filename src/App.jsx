@@ -1911,7 +1911,26 @@ function sumMicroAmounts(dailyLog, defs) {
   return totals;
 }
 
+// "bra ämnen" som finns uppmätta i databaserna — visas när dagens mängd är värd att nämna
+const BONUS_DEFS = [
+  { key: "omega3", name: "Omega-3", unit: "mg", min: 100, reason: "Fleromättat fett som är viktigt för hjärta och hjärna." },
+  { key: "epa_dha", name: "varav EPA + DHA", unit: "mg", min: 50, reason: "Den form av omega-3 som främst finns i fisk och skaldjur." },
+  { key: "beta_carotene", name: "Betakaroten", unit: "µg", min: 300, reason: "Antioxidant som kroppen omvandlar till A-vitamin." },
+  { key: "lycopene", name: "Lykopen", unit: "µg", min: 500, reason: "Antioxidant som ger tomater och vattenmelon sin röda färg." },
+  { key: "lutein", name: "Lutein & zeaxantin", unit: "µg", min: 300, reason: "Antioxidanter som samlas i ögat och hjälper till att skydda synen." },
+  { key: "wholegrain", name: "Fullkorn", unit: "g", min: 5, reason: "Ger fibrer och långsamma kolhydrater som håller dig mätt längre." },
+];
+function formatBonusAmount(v, unit) {
+  const n = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+  return `${n.toLocaleString("sv-SE")} ${unit}`;
+}
+
 function sumBonus(dailyLog) {
+  const fromDb = [];
+  BONUS_DEFS.forEach((d) => {
+    const total = dailyLog.reduce((s, e) => s + (Number((e.microAmounts || {})[d.key]) || 0), 0);
+    if (total >= d.min) fromDb.push({ name: d.name, amount: formatBonusAmount(total, d.unit), reason: d.reason });
+  });
   const totals = {};
   dailyLog.forEach((entry) => {
     (entry.bonus || []).forEach((b) => {
@@ -1923,7 +1942,8 @@ function sumBonus(dailyLog) {
       }
     });
   });
-  return Object.values(totals);
+  const dbNames = new Set(fromDb.map((b) => b.name.toLowerCase()));
+  return [...fromDb, ...Object.values(totals).filter((b) => !dbNames.has(b.name.toLowerCase()))];
 }
 
 function BarRow({ label, value, max, unit, color, colorDim, sublabel }) {
