@@ -2055,7 +2055,45 @@ const COMPOUNDS = [
             [["spenat", "spinach"], 4], [["selleri", "celery"], 3]] },
   { name: "Capsaicin", reason: "Det starka ämnet i chili.",
     foods: [[["cayenne"], 5], [["habanero"], 5], [["chili"], 4], [["jalapeño", "jalapeno"], 3]] },
+  { name: "L-teanin", reason: "Aminosyra i te som ger ett lugnt fokus och kan mildra koffeinets påslag.",
+    foods: [[["matcha"], 5], [["grönt te", "grön te", "green tea", "tea, green"], 4], [["vitt te", "white tea"], 4],
+            [["svart te", "black tea", "tea, black", "oolong"], 3]] },
+  { name: "Koffein", reason: "Pigger upp och skärper fokus. Sent på dagen kan det störa sömnen.",
+    foods: [[["espresso"], 5], [["kaffe", "coffee"], 5], [["energidryck", "energy drink"], 4], [["matcha"], 4],
+            [["svart te", "black tea", "tea, black"], 3], [["grönt te", "grön te", "green tea", "tea, green"], 3],
+            [["cola"], 2], [["mörk choklad", "dark chocolate", "chocolate, dark"], 2], [["kakao", "cocoa"], 2]] },
+  { name: "Klorogensyra", reason: "Polyfenol med antioxiderande effekt — kaffe är den största källan.",
+    foods: [[["kaffe", "coffee", "espresso"], 5], [["aubergine", "eggplant"], 3], [["blåbär", "blueberr"], 3],
+            [["päron", "pear"], 2], [["äpple", "apple"], 2]] },
+  { name: "Teobromin", reason: "Milt uppiggande ämne i kakao, mildare och mer långvarigt än koffein.",
+    foods: [[["kakao", "cocoa"], 5], [["mörk choklad", "dark chocolate", "chocolate, dark"], 4],
+            [["mjölkchoklad", "milk chocolate"], 2]] },
+  { name: "Olivpolyfenoler", reason: "Antioxidanter i olivolja, främst i extra jungfruolja.",
+    foods: [[["extra virgin", "extra jungfru"], 5], [["olivolja", "olive oil", "oil, olive"], 4], [["oliver", "olives"], 3]] },
+  { name: "Hesperidin", reason: "Flavonoid i citrusfrukter som kan stödja blodkärlen.",
+    foods: [[["apelsin", "orange"], 4], [["mandarin", "clementin", "tangerine"], 4],
+            [["citron", "lemon"], 3], [["lime"], 3], [["grapefrukt", "grapefruit"], 3]] },
+  { name: "Gingerol", reason: "Det starka ämnet i ingefära, kan lindra illamående.",
+    foods: [[["ingefära", "ginger"], 5]] },
+  { name: "Lignaner", reason: "Växtämnen i fröer och fullkorn med antioxiderande egenskaper.",
+    foods: [[["linfrö", "flaxseed", "flax seed"], 5], [["sesam", "sesame"], 4], [["råg", "rye"], 2]] },
+  { name: "Isoflavoner", reason: "Växtämnen i soja som kan stödja hjärta och benhälsa.",
+    foods: [[["sojabön", "soybean", "tempeh"], 5], [["tofu"], 4], [["edamame"], 4], [["soja", "soy"], 3]] },
+  { name: "Ergotionein", reason: "Antioxidant som främst finns i svamp.",
+    foods: [[["ostronskivling", "oyster mushroom"], 5], [["shiitake"], 4], [["champinjon", "mushroom"], 3], [["svamp"], 3]] },
+  { name: "Astaxantin", reason: "Rött färgämne i lax och skaldjur med stark antioxiderande effekt.",
+    foods: [[["vild lax", "wild salmon", "salmon, sockeye"], 5], [["lax", "salmon"], 4], [["röding", "char"], 3],
+            [["räkor", "räka", "shrimp"], 3], [["kräft", "crayfish"], 3]] },
+  { name: "Ellagitanniner", reason: "Polyfenoler i bär och nötter som tarmfloran omvandlar till nyttiga ämnen.",
+    foods: [[["granatäpple", "pomegranate"], 5], [["valnöt", "walnut"], 4], [["hallon", "raspberr"], 3],
+            [["björnbär", "blackberr"], 3], [["jordgubb", "strawberr"], 3]] },
 ];
+
+// ordet måste börja ett ord i namnet: "havre" hittar "havregryn", men "oat" hittar inte "goat" och "apple" inte "pineapple"
+function startsWord(text, word) {
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-zåäöéü])${esc}`).test(text);
+}
 
 // vilka av ämnena ovan ett livsmedel innehåller, utifrån dess namn
 function compoundsFor(...texts) {
@@ -2064,7 +2102,7 @@ function compoundsFor(...texts) {
   const out = [];
   COMPOUNDS.forEach((c) => {
     let level = 0;
-    c.foods.forEach(([words, lvl]) => { if (lvl > level && words.some((w) => t.includes(w))) level = lvl; });
+    c.foods.forEach(([words, lvl]) => { if (lvl > level && words.some((w) => startsWord(t, w))) level = lvl; });
     if (level) out.push({ name: c.name, level, amount: LEVEL_LABELS[level], reason: c.reason });
   });
   return out;
