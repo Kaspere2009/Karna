@@ -482,6 +482,20 @@ function mergeCandidates(remembered, results) {
   return [...rem, ...(results || []).filter((r) => !seen.has(r.id))];
 }
 
+async function lookupBarcode(code) {
+  try {
+    const res = await fetch("/api/food-lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ barcode: code }),
+    });
+    const data = await res.json();
+    return data.product || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function lookupFoodDatabase(name) {
   try {
     const res = await fetch("/api/food-lookup", {
@@ -711,6 +725,7 @@ export default function DotApp() {
   const [known100, setKnown100] = useState({}); // values the user knows, per 100g
   const [show100, setShow100] = useState(false);
   const [candidates, setCandidates] = useState([]); // databasträffar att välja bland
+  const [scanned, setScanned] = useState(null); // produkt från streckkodsskanning
 
   const ACTIVITY_MULT = { stillasittande: 1.2, lätt: 1.375, moderat: 1.55, aktiv: 1.725, "mycket aktiv": 1.9 };
 
@@ -898,10 +913,34 @@ export default function DotApp() {
     setMode("idle"); setFoodName(""); setWeight(""); setWeightUnit("g"); setPhotoDesc("");
     setPhotoData(null); setResult(null); setConfirmed(false);
     setChatOpen(false); setChatMsgs([]); setError("");
-    setKnown100({}); setShow100(false); setCandidates([]);
+    setKnown100({}); setShow100(false); setCandidates([]); setScanned(null);
+  }
+
+  async function handleScanned(code) {
+    setLoading(true); setError("");
+    const product = await lookupBarcode(code);
+    setLoading(false);
+    if (!product) {
+      setScanned(null);
+      setMode("manual");
+      setError(`Produkten (${code}) finns inte i databasen än. Sök på namnet i stället, eller fyll i värdena från förpackningen här nedanför.`);
+      return;
+    }
+    setScanned(product);
+    setCandidates([product]);
+    setFoodName(product.name);
+    setWeight(String(product.servingGrams || 100));
+    setWeightUnit("g");
+    setMode("manual");
   }
 
   async function estimateManual() {
+    if (scanned && foodName.trim() === scanned.name) {
+      if (!weight.trim()) { setError("Skriv hur många gram du åt."); return; }
+      await finishManual(scanned, { name: scanned.name, amount: weight.trim(), unit: weightUnit });
+      return;
+    }
+    setScanned(null);
     let name = foodName.trim();
     let amount = weight.trim();
     let unit = weightUnit;
@@ -1459,10 +1498,11 @@ export default function DotApp() {
 
         {/* choose method */}
         {mode === "choose" && (
-          <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, maxWidth: 480, margin: "40px auto" }}>
+          <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14, maxWidth: 520, margin: "40px auto" }}>
             {[
               { key: "manual", icon: Keyboard, title: "Manuellt", sub: "Skriv livsmedel + vikt" },
               { key: "photo", icon: Camera, title: "Bild", sub: "Fota din måltid" },
+              { key: "scan", icon: BarcodeIcon, title: "Skanna", sub: "Streckkod på förpackningen" },
             ].map((opt) => (
               <button
                 key={opt.key}
@@ -1482,9 +1522,20 @@ export default function DotApp() {
           </div>
         )}
 
+        {/* barcode scanning */}
+        {mode === "scan" && (
+          <BarcodeScanner onCode={handleScanned} onCancel={() => setMode("choose")} loading={loading} />
+        )}
+
         {/* manual entry */}
         {mode === "manual" && (
           <div className="fade-up" style={{ maxWidth: 420, margin: "20px auto" }}>
+            {scanned && foodName.trim() === scanned.name && (
+              <div className="fade-up" style={{ ...glass, borderRadius: 12, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: C.textDim, lineHeight: 1.5 }}>
+                <span style={{ color: C.accent }}>Skannad produkt:</span> {scanned.name}{scanned.brand ? ` (${scanned.brand})` : ""} · {Math.round(scanned.per100.kcal)} kcal per 100 g.
+                {scanned.servingGrams ? ` En portion är ${scanned.servingGrams} g enligt förpackningen.` : ""} Ändra mängden om du åt mer eller mindre.
+              </div>
+            )}
             <label style={{ fontSize: 12.5, color: C.textDim, display: "block", marginBottom: 6 }}>Matvara</label>
             <input
               value={foodName} onChange={(e) => setFoodName(e.target.value)}
@@ -2972,6 +3023,99 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
       {photoError && (
         <p style={{ fontSize: 11, color: "#E08F8F", marginTop: -12, marginBottom: 20 }}>{photoError}</p>
       )}
+    </div>
+  );
+}
+
+function BarcodeIcon({ size = 20, color = "currentColor", style }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" style={style}>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+      <path d="M7 8v8M10 8v8M13 8v8M16 8v8" />
+    </svg>
+  );
+}
+
+// kameran läser streckkoden: inbyggd BarcodeDetector där den finns (Chrome/Android), annars ZXing (t.ex. iPhone)
+function BarcodeScanner({ onCode, onCancel, loading }) {
+  const videoRef = useRef(null);
+  const doneRef = useRef(false);
+  const [status, setStatus] = useState("Startar kameran…");
+  const [typed, setTyped] = useState("");
+
+  function submit(code) {
+    if (doneRef.current || !code) return;
+    doneRef.current = true;
+    onCode(code);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    let stop = null;
+    (async () => {
+      try {
+        if ("BarcodeDetector" in window) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+          const video = videoRef.current;
+          video.srcObject = stream;
+          await video.play();
+          const detector = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+          let timer = null;
+          stop = () => { clearTimeout(timer); stream.getTracks().forEach((t) => t.stop()); };
+          setStatus("Rikta kameran mot streckkoden");
+          const tick = async () => {
+            if (cancelled || doneRef.current) return;
+            try {
+              const codes = await detector.detect(video);
+              if (codes.length) { stop(); submit(codes[0].rawValue); return; }
+            } catch (e) { /* försök igen */ }
+            timer = setTimeout(tick, 250);
+          };
+          tick();
+        } else {
+          const mod = await import(/* @vite-ignore */ "https://esm.sh/@zxing/browser@0.1.5");
+          if (cancelled) return;
+          const reader = new mod.BrowserMultiFormatReader();
+          const controls = await reader.decodeFromConstraints(
+            { video: { facingMode: "environment" } },
+            videoRef.current,
+            (result) => { if (result && !doneRef.current) { controls.stop(); submit(result.getText()); } }
+          );
+          if (cancelled) { controls.stop(); return; }
+          stop = () => controls.stop();
+          setStatus("Rikta kameran mot streckkoden");
+        }
+      } catch (e) {
+        setStatus("Kunde inte starta kameran. Tillåt kameran i webbläsaren, eller skriv streckkoden här nedanför.");
+      }
+    })();
+    return () => { cancelled = true; if (stop) stop(); };
+  }, []);
+
+  return (
+    <div className="fade-up" style={{ maxWidth: 420, margin: "20px auto" }}>
+      <div style={{ position: "relative", borderRadius: 16, overflow: "hidden", background: "#000", aspectRatio: "3 / 4", marginBottom: 12 }}>
+        <video ref={videoRef} playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <div style={{
+          position: "absolute", left: "10%", right: "10%", top: "40%", height: "20%",
+          border: `2px solid ${C.accent}`, borderRadius: 12, boxShadow: "0 0 0 9999px rgba(0,0,0,.35)",
+        }} />
+      </div>
+      <p style={{ fontSize: 12.5, color: C.textDim, textAlign: "center", marginBottom: 18 }}>
+        {loading ? "Hämtar produkten…" : status}
+      </p>
+      <label style={onbLabel}>Eller skriv siffrorna under streckkoden</label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <input
+          value={typed} inputMode="numeric" placeholder="t.ex. 7310500088853"
+          onChange={(e) => setTyped(e.target.value.replace(/\D/g, ""))}
+          onKeyDown={(e) => e.key === "Enter" && typed.length >= 8 && submit(typed)}
+          style={{ ...onbInput, flex: 1 }}
+        />
+        <button onClick={() => typed.length >= 8 && submit(typed)} style={{ ...primaryBtn, opacity: typed.length >= 8 ? 1 : 0.5 }}>Sök</button>
+      </div>
+      <button onClick={onCancel} style={ghostBtn}>Tillbaka</button>
     </div>
   );
 }
