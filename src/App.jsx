@@ -745,6 +745,7 @@ export default function DotApp() {
         const k = l.log_date;
         if (!logsByDay[k]) logsByDay[k] = [];
         logsByDay[k].push({
+          id: l.id, grams: l.grams ?? null,
           name: l.name, kcal: l.kcal, protein_g: l.protein_g, carbs_g: l.carbs_g, sugar_g: l.sugar_g,
           fiber_g: l.fiber_g, fat_g: l.fat_g, satfat_g: l.satfat_g, transfat_g: l.transfat_g,
           microAmounts: l.micro_amounts || {}, bonus: l.bonus || [], estimatedKeys: [],
@@ -844,6 +845,54 @@ export default function DotApp() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMsgs, chatLoading]);
+
+  // ---------- loggade livsmedel: lägg till, ändra mängd, ta bort ----------
+  function logBody(e) {
+    return {
+      name: e.name, kcal: e.kcal, protein_g: e.protein_g, carbs_g: e.carbs_g, sugar_g: e.sugar_g,
+      fiber_g: e.fiber_g, fat_g: e.fat_g, satfat_g: e.satfat_g, transfat_g: e.transfat_g,
+      micro_amounts: e.microAmounts || {}, bonus: e.bonus || [], grams: e.grams ?? null,
+    };
+  }
+  function addLogEntry(entry) {
+    const tmpId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const withTmp = { ...entry, tmpId };
+    setDayFoodLogs((logs) => ({ ...logs, [todayKey]: [...(logs[todayKey] || []), withTmp] }));
+    if (!session) return;
+    supabaseRest("daily_logs", {
+      method: "POST", accessToken: session.access_token,
+      body: { user_id: session.user.id, log_date: todayKey, ...logBody(entry) },
+    })
+      .then((rows) => {
+        const row = Array.isArray(rows) ? rows[0] : null;
+        if (!row) return;
+        setDayFoodLogs((logs) => ({
+          ...logs,
+          [todayKey]: (logs[todayKey] || []).map((e) => (e.tmpId === tmpId ? { ...e, id: row.id } : e)),
+        }));
+      })
+      .catch((e) => { console.error("Kunde inte spara loggningen:", e.message); setSyncError("Kunde inte spara till databasen: " + e.message); });
+  }
+  const sameEntry = (a, b) => (a.id && a.id === b.id) || (a.tmpId && a.tmpId === b.tmpId);
+  function removeLogEntry(dayKey, entry) {
+    setDayFoodLogs((logs) => ({ ...logs, [dayKey]: (logs[dayKey] || []).filter((e) => !sameEntry(e, entry)) }));
+    if (session && entry.id) {
+      supabaseRest("daily_logs", { method: "DELETE", accessToken: session.access_token, params: { id: `eq.${entry.id}` } })
+        .catch((e) => { console.error("Kunde inte ta bort:", e.message); setSyncError("Kunde inte ta bort från databasen: " + e.message); });
+    }
+  }
+  function scaleLogEntry(dayKey, entry, factor, newGrams) {
+    if (!(factor > 0)) return;
+    const r1 = (v) => Math.round((Number(v) || 0) * factor * 10) / 10;
+    const scaled = { ...entry, grams: newGrams ?? (entry.grams ? Math.round(entry.grams * factor) : null) };
+    KNOWN_FIELDS.forEach(({ key }) => { scaled[key] = r1(entry[key]); });
+    scaled.microAmounts = Object.fromEntries(Object.entries(entry.microAmounts || {}).map(([k, v]) => [k, Math.round((Number(v) || 0) * factor * 1000) / 1000]));
+    setDayFoodLogs((logs) => ({ ...logs, [dayKey]: (logs[dayKey] || []).map((e) => (sameEntry(e, entry) ? scaled : e)) }));
+    if (session && entry.id) {
+      supabaseRest("daily_logs", { method: "PATCH", accessToken: session.access_token, params: { id: `eq.${entry.id}` }, body: logBody(scaled) })
+        .catch((e) => { console.error("Kunde inte ändra:", e.message); setSyncError("Kunde inte spara ändringen: " + e.message); });
+    }
+  }
 
   function reset() {
     setMode("idle"); setFoodName(""); setWeight(""); setWeightUnit("g"); setPhotoDesc("");
@@ -1287,22 +1336,7 @@ export default function DotApp() {
         <MealsPage
           savedMeals={savedMeals} setSavedMeals={setSavedMeals} session={session}
           onLogMeal={(meal) => {
-            setDayFoodLogs((logs) => ({
-              ...logs,
-              [todayKey]: [...(logs[todayKey] || []), { ...meal, name: meal.name }],
-            }));
-            if (session) {
-              supabaseRest("daily_logs", {
-                method: "POST", accessToken: session.access_token,
-                body: {
-                  user_id: session.user.id, log_date: todayKey, name: meal.name,
-                  kcal: meal.kcal, protein_g: meal.protein_g, carbs_g: meal.carbs_g,
-                  sugar_g: meal.sugar_g, fiber_g: meal.fiber_g, fat_g: meal.fat_g,
-                  satfat_g: meal.satfat_g, transfat_g: meal.transfat_g,
-                  micro_amounts: meal.microAmounts, bonus: meal.bonus,
-                },
-              }).catch((e) => { console.error("Kunde inte spara loggningen:", e.message); setSyncError("Kunde inte spara till databasen: " + e.message); });
-            }
+            addLogEntry({ ...meal, name: meal.name, grams: null });
             setPage("log");
           }}
           onCreateNew={() => { setMealName(""); setMealIngredients([]); setPage("meal-builder"); }}
@@ -1409,14 +1443,13 @@ export default function DotApp() {
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {dailyLog.map((e, i) => (
-                      <div key={i} style={{
-                        ...glass, borderRadius: 14, padding: "12px 16px",
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                      }}>
-                        <span style={{ fontSize: 13.5 }}>{e.name || "Måltid"}</span>
-                        <span style={{ ...mono, fontSize: 12.5, color: C.accent }}>{Math.round(e.kcal || 0)} kcal</span>
-                      </div>
+                      <LogRow
+                        key={e.id || e.tmpId || i} entry={e}
+                        onDelete={() => removeLogEntry(todayKey, e)}
+                        onScale={(factor, newGrams) => scaleLogEntry(todayKey, e, factor, newGrams)}
+                      />
                     ))}
+                    <p style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>Tryck på en rad för att ändra mängd eller ta bort.</p>
                   </div>
                 )}
               </div>
@@ -1676,25 +1709,12 @@ export default function DotApp() {
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <button
                   onClick={() => {
+                    if (confirmed) return;
                     setConfirmed(true);
-                    setDayFoodLogs((logs) => ({
-                      ...logs,
-                      [todayKey]: [...(logs[todayKey] || []), { name: foodName, ...result }],
-                    }));
-                    if (session) {
-                      supabaseRest("daily_logs", {
-                        method: "POST", accessToken: session.access_token,
-                        body: {
-                          user_id: session.user.id, log_date: todayKey, name: foodName,
-                          kcal: result.kcal, protein_g: result.protein_g, carbs_g: result.carbs_g,
-                          sugar_g: result.sugar_g, fiber_g: result.fiber_g, fat_g: result.fat_g,
-                          satfat_g: result.satfat_g, transfat_g: result.transfat_g,
-                          micro_amounts: result.microAmounts, bonus: result.bonus,
-                        },
-                      }).catch((e) => { console.error("Kunde inte spara loggningen:", e.message); setSyncError("Kunde inte spara till databasen: " + e.message); });
-                    }
+                    addLogEntry({ name: foodName, ...result, grams: result.estimatedGrams ?? null });
                   }}
-                  style={{ ...primaryBtn, width: "100%" }}
+                  disabled={confirmed}
+                  style={{ ...primaryBtn, width: "100%", opacity: confirmed ? 0.6 : 1 }}
                 >
                   <Check size={15} /> {confirmed ? "Loggat" : "Bekräfta & logga"}
                 </button>
@@ -2951,6 +2971,65 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
       <input id="progress-photo" type="file" accept="image/*" onChange={handlePhoto} style={{ display: "none" }} />
       {photoError && (
         <p style={{ fontSize: 11, color: "#E08F8F", marginTop: -12, marginBottom: 20 }}>{photoError}</p>
+      )}
+    </div>
+  );
+}
+
+function LogRow({ entry, onDelete, onScale }) {
+  const [open, setOpen] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const hasGrams = Number(entry.grams) > 0;
+  const [value, setValue] = useState(hasGrams ? String(entry.grams) : "1");
+
+  function save() {
+    const v = Number(String(value).replace(",", "."));
+    if (!(v > 0)) return;
+    if (hasGrams) onScale(v / Number(entry.grams), Math.round(v));
+    else onScale(v, null);
+    setOpen(false);
+  }
+
+  return (
+    <div style={{ ...glass, borderRadius: 14, overflow: "hidden" }}>
+      <button
+        onClick={() => { setOpen((o) => !o); setConfirmDel(false); setValue(hasGrams ? String(entry.grams) : "1"); }}
+        style={{
+          width: "100%", background: "none", border: "none", cursor: "pointer", color: C.text,
+          padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left",
+        }}
+      >
+        <span style={{ fontSize: 13.5 }}>
+          {entry.name || "Måltid"}
+          {hasGrams && <span style={{ color: C.textFaint, fontSize: 11.5 }}> · {Math.round(entry.grams)} g</span>}
+        </span>
+        <span style={{ ...mono, fontSize: 12.5, color: C.accent }}>{Math.round(entry.kcal || 0)} kcal</span>
+      </button>
+      {open && (
+        <div className="fade-up" style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: C.textDim, flex: 1 }}>{hasGrams ? "Mängd (gram)" : "Antal portioner"}</span>
+            <input
+              value={value} inputMode="decimal"
+              onChange={(ev) => setValue(ev.target.value.replace(/[^0-9.,]/g, ""))}
+              onKeyDown={(ev) => ev.key === "Enter" && save()}
+              style={{ ...onbInput, width: 90, padding: "8px 10px", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace" }}
+            />
+            <button onClick={save} style={{ ...primaryBtn, padding: "8px 14px", fontSize: 12.5 }}>Spara</button>
+          </div>
+          {!confirmDel ? (
+            <button onClick={() => setConfirmDel(true)} style={{ ...ghostBtn, color: "#E08F8F", padding: "8px 12px" }}>
+              <Trash2 size={13} /> Ta bort
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setConfirmDel(false)} style={{ ...ghostBtn, flex: 1, padding: "8px 12px" }}>Avbryt</button>
+              <button onClick={onDelete} style={{ ...primaryBtn, flex: 1, padding: "8px 12px", background: "#E08F8F", boxShadow: "none", color: "#2a0f0f" }}>
+                Ja, ta bort
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
