@@ -233,8 +233,11 @@ async function searchOpenFoodFacts(term) {
     .filter((p) => p.product_name && p.nutriments && (p.nutriments["energy-kcal_100g"] ?? p.nutriments["energy-kcal"]) != null)
     .filter((p) => words.every((w) => p.product_name.toLowerCase().includes(w)))
     .slice(0, 4)
-    .map((p) => {
-      const n = p.nutriments;
+    .map(offToCandidate);
+}
+
+function offToCandidate(p) {
+      const n = p.nutriments || {};
       const micros100 = {};
       for (const [key, names] of Object.entries(OFF_MICROS)) {
         for (const nm of names) {
@@ -261,15 +264,43 @@ async function searchOpenFoodFacts(term) {
           transfat_g: round(nonNeg(n["trans-fat_100g"]), 1),
         },
         micros100: Object.keys(micros100).length ? micros100 : null,
+        servingGrams: Number(p.serving_quantity) > 0 ? Math.round(Number(p.serving_quantity)) : null,
       };
-    });
+}
+
+// streckkod (EAN) → en produkt från Open Food Facts
+async function lookupBarcode(code) {
+  const res = await fetchWithTimeout(
+    `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json` +
+    `?fields=code,product_name,product_name_sv,product_name_en,brands,nutriments,serving_quantity`,
+    8000,
+    { headers: { "User-Agent": "DOT-app/0.1 (prototype)" } }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const p = data && data.product;
+  if (!p || !p.nutriments) return null;
+  const kcal = p.nutriments["energy-kcal_100g"] ?? p.nutriments["energy-kcal"];
+  if (kcal == null) return null;
+  p.product_name = p.product_name_sv || p.product_name || p.product_name_en || "Okänd produkt";
+  p.code = p.code || code;
+  return offToCandidate(p);
 }
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
-  const { query, country } = req.body || {};
+  const { query, country, barcode } = req.body || {};
+  if (barcode) {
+    const code = String(barcode).replace(/\D/g, "");
+    if (code.length < 8) return res.status(200).json({ product: null });
+    try {
+      return res.status(200).json({ product: await lookupBarcode(code) });
+    } catch (e) {
+      return res.status(200).json({ product: null });
+    }
+  }
   if (!query || !query.trim()) {
     return res.status(400).json({ error: "Ingen sökterm angiven." });
   }
