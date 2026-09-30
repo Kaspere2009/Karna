@@ -21,7 +21,7 @@ async function searchOwnTable(term, country) {
     return {
     id: r.id,
     source: (SOURCE_LABELS[r.source] || r.source) + (extra ? ", kompletterat med USDA FoodData Central" : ""),
-    name: r.name_sv || r.name_en,
+    name: country && country !== "SE" ? (r.name_en || r.name_sv) : (r.name_sv || r.name_en),
     per100: {
       kcal: Number(r.kcal) || 0, protein_g: Number(r.protein_g) || 0, carbs_g: Number(r.carbs_g) || 0,
       sugar_g: Number(r.sugar_g) || 0, fiber_g: Number(r.fiber_g) || 0, fat_g: Number(r.fat_g) || 0,
@@ -222,7 +222,12 @@ async function searchUsda(term) {
 }
 
 // ---------- Open Food Facts ----------
-async function searchOpenFoodFacts(term) {
+const OFF_COUNTRY_TAGS = {
+  SE: "en:sweden", NO: "en:norway", DK: "en:denmark", FI: "en:finland",
+  DE: "en:germany", GB: "en:united-kingdom", US: "en:united-states",
+};
+
+async function searchOpenFoodFacts(term, country) {
   const url =
     `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}` +
     `&search_simple=1&action=process&json=1&page_size=15`;
@@ -232,6 +237,10 @@ async function searchOpenFoodFacts(term) {
   return (data.products || [])
     .filter((p) => p.product_name && p.nutriments && (p.nutriments["energy-kcal_100g"] ?? p.nutriments["energy-kcal"]) != null)
     .filter((p) => words.every((w) => p.product_name.toLowerCase().includes(w)))
+    // varor som säljs i användarens land först
+    .map((p, i) => ({ p, i, local: OFF_COUNTRY_TAGS[country] && (p.countries_tags || []).includes(OFF_COUNTRY_TAGS[country]) ? 1 : 0 }))
+    .sort((a, b) => b.local - a.local || a.i - b.i)
+    .map((x) => x.p)
     .slice(0, 4)
     .map(offToCandidate);
 }
@@ -314,7 +323,7 @@ export default async function handler(req, res) {
   const [own, ownEn, off] = await Promise.allSettled([
     searchOwnTable(original, country),
     english !== original ? searchOwnTable(english, country) : Promise.resolve([]),
-    searchOpenFoodFacts(original),
+    searchOpenFoodFacts(original, country),
   ]);
   const seen = new Set();
   let base = [
