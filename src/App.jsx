@@ -573,7 +573,7 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj, dbHit = nu
   };
 }
 
-export default function KarnaPrototype() {
+export default function DotApp() {
   const [page, setPage] = useState("login"); // login | email-login | auth | profile | log | dashboard
   const [authInfo, setAuthInfo] = useState({ email: "", password: "" });
   const [session, setSession] = useState(null); // { access_token, refresh_token, expires_at, user: { id, email } }
@@ -1012,16 +1012,7 @@ export default function KarnaPrototype() {
         {isOnboarding && (
           <div className="fade-up" style={{ padding: "56px 26px 32px", minHeight: "100%", display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 34, justifyContent: "center" }}>
-              <svg width="30" height="33" viewBox="0 0 32 36" style={{ filter: "drop-shadow(0 0 8px rgba(143,217,168,.55))" }}>
-                <defs>
-                  <linearGradient id="seedGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#F2C063" />
-                    <stop offset="100%" stopColor="#8FD9A8" />
-                  </linearGradient>
-                </defs>
-                <path d="M16 3 C 19 4.5, 19.5 7, 21.5 9 C 29 15, 29 24, 21.5 30.5 C 18 34, 14 34, 10.5 30.5 C 3 24, 3 15, 10.5 9 C 12.5 7, 13 4.5, 16 3 Z" fill="url(#seedGrad2)" />
-              </svg>
-              <span style={{ ...display, fontSize: 21, fontWeight: 600 }}>kärna</span>
+<DotLogo size={30} />
             </div>
 
             {page === "login" && (
@@ -1030,7 +1021,7 @@ export default function KarnaPrototype() {
                   Välkommen
                 </p>
                 <p style={{ fontSize: 12.5, color: C.textDim, marginBottom: 30, textAlign: "center" }}>
-                  Mår kärnan bra, mår hela kroppen bra.
+                  Discipline Over Time.
                 </p>
 
                 <button onClick={startGoogleLogin} style={socialBtn}>
@@ -1089,7 +1080,7 @@ export default function KarnaPrototype() {
               <>
                 <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 4 }}>Skapa konto</p>
                 <p style={{ fontSize: 12.5, color: C.textDim, marginBottom: 26 }}>
-                  Mår kärnan bra, mår hela kroppen bra.
+                  Discipline Over Time.
                 </p>
                 <label style={onbLabel}>E-post</label>
                 <input
@@ -1225,21 +1216,7 @@ export default function KarnaPrototype() {
         padding: "18px 22px 14px",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <svg width="22" height="24" viewBox="0 0 32 36" style={{ filter: "drop-shadow(0 0 6px rgba(143,217,168,.5))" }}>
-            <defs>
-              <linearGradient id="seedGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#F2C063" />
-                <stop offset="100%" stopColor="#8FD9A8" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M16 3 C 19 4.5, 19.5 7, 21.5 9 C 29 15, 29 24, 21.5 30.5 C 18 34, 14 34, 10.5 30.5 C 3 24, 3 15, 10.5 9 C 12.5 7, 13 4.5, 16 3 Z"
-              fill="url(#seedGrad)"
-            />
-          </svg>
-          <span style={{ ...display, fontSize: 16, fontWeight: 600, letterSpacing: "-0.01em" }}>
-            kärna
-          </span>
+<DotLogo size={19} />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {streak > 0 && (
@@ -1512,7 +1489,7 @@ export default function KarnaPrototype() {
               </div>
             </div>
             <p style={{ fontSize: 11, color: C.textFaint, marginBottom: 8 }}>
-              T.ex. "1 kopp grönt te" — skriv 1 och välj kopp. Kärna räknar om till gram åt dig.
+              T.ex. "1 kopp grönt te" — skriv 1 och välj kopp. DOT räknar om till gram åt dig.
             </p>
             <button
               onClick={() => setShow100((v) => !v)}
@@ -1526,7 +1503,7 @@ export default function KarnaPrototype() {
             </button>
             <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: show100 ? 12 : 22 }}>
               {show100
-                ? "Precis som på förpackningen — kärna räknar om till din faktiska vikt. Lämna resten tomt så uppskattar AI:n det."
+                ? "Precis som på förpackningen — DOT räknar om till din faktiska vikt. Lämna resten tomt så uppskattar AI:n det."
                 : "Vet du t.ex. protein- eller fettinnehållet per 100g (från förpackningen)? Fyll i det du vet, rekommenderat för bästa resultat — annars uppskattar AI:n allt."}
             </p>
 
@@ -1918,6 +1895,24 @@ const socialBtn = {
   padding: "12px 0", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 14, cursor: "pointer",
 };
 
+// D●T — O:et är en punkt
+function DotLogo({ size = 20 }) {
+  const dot = Math.round(size * 0.66);
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: Math.max(2, Math.round(size * 0.06)),
+      fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: size, lineHeight: 1, color: C.text, letterSpacing: "0.02em",
+    }}>
+      D
+      <span style={{
+        width: dot, height: dot, borderRadius: 999, display: "inline-block",
+        background: "linear-gradient(135deg, #F2C063, #8FD9A8)", boxShadow: "0 0 12px rgba(143,217,168,.5)",
+      }} />
+      T
+    </span>
+  );
+}
+
 function AppleIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 384 512" fill="#111">
@@ -2248,7 +2243,7 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
             Stötte du på ett problem, eller har du en idé till en ny funktion? Hör av dig.
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.accent }}>
-            <Mail size={14} /> hej@karna-app.se
+            <Mail size={14} /> Kontaktadress kommer snart
           </div>
         </div>
       </div>
@@ -2259,21 +2254,14 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
   if (view === "about") {
     return (
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Om kärna" onBack={() => setView("menu")} />
+        <SettingsSubHeader title="Om DOT" onBack={() => setView("menu")} />
         <div style={{ textAlign: "center", padding: "30px 0" }}>
-          <svg width="34" height="37" viewBox="0 0 32 36" style={{ margin: "0 auto 14px" }}>
-            <defs>
-              <linearGradient id="aboutSeedGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#F2C063" />
-                <stop offset="100%" stopColor="#8FD9A8" />
-              </linearGradient>
-            </defs>
-            <path d="M16 3 C 19 4.5, 19.5 7, 21.5 9 C 29 15, 29 24, 21.5 30.5 C 18 34, 14 34, 10.5 30.5 C 3 24, 3 15, 10.5 9 C 12.5 7, 13 4.5, 16 3 Z" fill="url(#aboutSeedGrad)" />
-          </svg>
-          <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>kärna</p>
+<div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><DotLogo size={34} /></div>
           <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>Version 0.1 (prototyp)</p>
-          <p style={{ fontSize: 12.5, color: C.textDim, marginTop: 14, maxWidth: 260, marginLeft: "auto", marginRight: "auto" }}>
-            Mår kärnan bra, mår hela kroppen bra.
+          <p style={{ ...display, fontSize: 14, color: C.text, marginTop: 14 }}>Discipline Over Time.</p>
+          <p style={{ fontSize: 12.5, color: C.textDim, marginTop: 14, maxWidth: 320, marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
+            DOT står för disciplin och tålamod — de två saker som krävs för att lyckas, i livet och med kosten.
+            Små val varje dag, under lång tid.
           </p>
           <p style={{ fontSize: 11, color: C.textFaint, marginTop: 24, maxWidth: 320, marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
             Näringsdata: Livsmedelsverkets livsmedelsdatabas (Livsmedelsverket, CC BY 4.0), USDA FoodData Central och Open Food Facts (ODbL).
@@ -2299,7 +2287,7 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
       <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Data & support</p>
       <SettingsRow icon={ShieldCheck} label="Dataskydd & export" onClick={() => setView("privacy")} />
       <SettingsRow icon={HelpCircle} label="Hjälp & support" onClick={() => setView("help")} />
-      <SettingsRow icon={Info} label="Om kärna" sub="Version 0.1" onClick={() => setView("about")} />
+      <SettingsRow icon={Info} label="Om DOT" sub="Version 0.1" onClick={() => setView("about")} />
 
       <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>&nbsp;</p>
       <SettingsRow icon={LogOut} label="Logga ut" onClick={onLogout} />
@@ -2322,7 +2310,7 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
       )}
 
       <p style={{ textAlign: "center", fontSize: 11, color: C.textFaint, marginTop: 26 }}>
-        kärna · prototyp v0.1
+        DOT · prototyp v0.1
       </p>
     </div>
   );
