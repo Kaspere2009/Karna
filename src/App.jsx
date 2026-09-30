@@ -2022,6 +2022,54 @@ const BONUS_DEFS = [
   { key: "lutein", name: "Lutein & zeaxantin", unit: "µg", min: 300, reason: "Antioxidanter som samlas i ögat och hjälper till att skydda synen." },
   { key: "wholegrain", name: "Fullkorn", unit: "g", min: 5, reason: "Ger fibrer och långsamma kolhydrater som håller dig mätt längre." },
 ];
+// nyttiga ämnen som INTE finns uppmätta i databaserna — visas med nivå i stället för mängd.
+// Nivåerna (1–5) bygger på typiska halter i forskningen (t.ex. USDA:s flavonoiddatabas och Phenol-Explorer).
+const LEVEL_LABELS = { 1: "Mycket låg", 2: "Låg", 3: "Medel", 4: "Hög", 5: "Mycket hög" };
+const COMPOUNDS = [
+  { name: "Katekiner", reason: "Antioxidanter som kan stödja hjärta och blodkärl.",
+    foods: [[["matcha"], 5], [["kakao", "cocoa"], 5], [["grönt te", "grön te", "green tea", "tea, green"], 4],
+            [["mörk choklad", "dark chocolate", "chocolate, dark"], 4], [["svart te", "black tea", "tea, black"], 3],
+            [["äpple", "apple"], 2]] },
+  { name: "Antocyaniner", reason: "Färgämnen i blå och röda bär och grönsaker som fungerar som antioxidanter.",
+    foods: [[["aronia", "chokeberr"], 5], [["blåbär", "blueberr", "bilberr"], 5], [["björnbär", "blackberr"], 5],
+            [["svarta vinbär", "blackcurrant", "currants, european black"], 5], [["rödkål", "red cabbage", "cabbage, red"], 4],
+            [["körsbär", "cherr"], 3], [["hallon", "raspberr"], 3], [["lingon", "lingonberr"], 3],
+            [["jordgubb", "strawberr"], 2], [["röda vindruvor", "red grapes"], 2]] },
+  { name: "Sulforafan", reason: "Bildas när man tuggar korsblommiga grönsaker och stöttar kroppens egna skyddssystem.",
+    foods: [[["broccoligroddar", "broccoli sprouts"], 5], [["broccoli"], 4], [["grönkål", "kale"], 3],
+            [["brysselkål", "brussels sprouts"], 3], [["blomkål", "cauliflower"], 2], [["vitkål"], 2]] },
+  { name: "Allicin", reason: "Svavelförening i vitlök som bildas när den hackas eller krossas.",
+    foods: [[["vitlök", "garlic"], 5]] },
+  { name: "Kvercetin", reason: "Flavonoid med antioxiderande egenskaper, finns rikligt i lök.",
+    foods: [[["kapris", "capers"], 5], [["rödlök", "red onion", "onions, red"], 5], [["gul lök", "onion"], 4],
+            [["grönkål", "kale"], 3], [["äpple", "apple"], 2], [["broccoli"], 2]] },
+  { name: "Kurkumin", reason: "Det gula ämnet i gurkmeja. Tas upp bättre tillsammans med svartpeppar och fett.",
+    foods: [[["gurkmeja", "turmeric"], 5], [["curry"], 2]] },
+  { name: "Probiotika", reason: "Levande mjölksyrabakterier som kan stödja tarmfloran.",
+    foods: [[["kefir"], 5], [["filmjölk"], 4], [["kimchi"], 4], [["surkål", "sauerkraut"], 3],
+            [["kombucha"], 3], [["yoghurt", "yogurt"], 3]] },
+  { name: "Betaglukan", reason: "Löslig fiber i havre och korn som kan bidra till lägre kolesterol.",
+    foods: [[["havre", "oat"], 4], [["korngryn", "pärlgryn", "barley"], 4]] },
+  { name: "Kostnitrat", reason: "Omvandlas i kroppen till kväveoxid, som vidgar blodkärlen.",
+    foods: [[["rödbet", "beetroot", "beets"], 5], [["ruccola", "rucola", "arugula", "rocket"], 5],
+            [["spenat", "spinach"], 4], [["selleri", "celery"], 3]] },
+  { name: "Capsaicin", reason: "Det starka ämnet i chili.",
+    foods: [[["cayenne"], 5], [["habanero"], 5], [["chili"], 4], [["jalapeño", "jalapeno"], 3]] },
+];
+
+// vilka av ämnena ovan ett livsmedel innehåller, utifrån dess namn
+function compoundsFor(...texts) {
+  const t = texts.filter(Boolean).join(" | ").toLowerCase();
+  if (!t) return [];
+  const out = [];
+  COMPOUNDS.forEach((c) => {
+    let level = 0;
+    c.foods.forEach(([words, lvl]) => { if (lvl > level && words.some((w) => t.includes(w))) level = lvl; });
+    if (level) out.push({ name: c.name, level, amount: LEVEL_LABELS[level], reason: c.reason });
+  });
+  return out;
+}
+
 function formatBonusAmount(v, unit) {
   const n = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
   return `${n.toLocaleString("sv-SE")} ${unit}`;
@@ -2035,17 +2083,31 @@ function sumBonus(dailyLog) {
   });
   const totals = {};
   dailyLog.forEach((entry) => {
-    (entry.bonus || []).forEach((b) => {
+    const found = [...compoundsFor(entry.name, entry.matchedName).map((b) => ({ ...b, from: entry.name })), ...(entry.bonus || [])];
+    found.forEach((b) => {
       if (!b.name) return;
-      if (!totals[b.name]) totals[b.name] = { name: b.name, amount: b.amount, reason: b.reason };
-      else {
-        if (b.amount) totals[b.name].amount = b.amount;
-        if (b.reason && !totals[b.name].reason) totals[b.name].reason = b.reason;
+      const cur = totals[b.name];
+      if (!cur) {
+        totals[b.name] = { name: b.name, amount: b.amount, reason: b.reason, level: b.level || 0, from: new Set(b.from ? [b.from] : []) };
+        return;
       }
+      if (b.from) cur.from.add(b.from);
+      if (b.level) {
+        if (b.level > (cur.level || 0)) { cur.level = b.level; cur.amount = b.amount; }
+      } else if (b.amount && !cur.level) {
+        cur.amount = b.amount;
+      }
+      if (b.reason && !cur.reason) cur.reason = b.reason;
     });
   });
+  const qualitative = Object.values(totals).map((b) => ({
+    name: b.name,
+    amount: b.amount,
+    level: b.level,
+    reason: b.from && b.from.size ? `${b.reason || ""} Finns i: ${[...b.from].join(", ")}.`.trim() : b.reason,
+  }));
   const dbNames = new Set(fromDb.map((b) => b.name.toLowerCase()));
-  return [...fromDb, ...Object.values(totals).filter((b) => !dbNames.has(b.name.toLowerCase()))];
+  return [...fromDb, ...qualitative.filter((b) => !dbNames.has(b.name.toLowerCase()))];
 }
 
 function BarRow({ label, value, max, unit, color, colorDim, sublabel }) {
@@ -2579,8 +2641,13 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
       Object.entries(ing.microAmounts || {}).forEach(([k, v]) => { microAmounts[k] = (microAmounts[k] || 0) + v; });
     });
     const bonusMap = {};
-    ingredients.forEach((ing) => (ing.bonus || []).forEach((b) => { bonusMap[b.name] = b.amount; }));
-    const bonus = Object.entries(bonusMap).map(([name, amount]) => ({ name, amount }));
+    ingredients.forEach((ing) => {
+      [...compoundsFor(ing.name, ing.matchedName), ...(ing.bonus || [])].forEach((b) => {
+        const cur = bonusMap[b.name];
+        if (!cur || (b.level || 0) > (cur.level || 0)) bonusMap[b.name] = b;
+      });
+    });
+    const bonus = Object.values(bonusMap);
     onSave({ id: Date.now(), name: mealName, ...totals, microAmounts, bonus, estimatedKeys: [] });
   }
 
@@ -3302,7 +3369,7 @@ function Dashboard({ dailyLog, targets }) {
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
               <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 6, color: C.bonus }}>Bra ämnen idag</p>
               <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 16 }}>
-                Visas bara här om du faktiskt fått i dig något av det — ingen lista över allt som finns.
+                Visas bara här om du faktiskt fått i dig något av det. Uppmätta ämnen visas med mängd; övriga med en ungefärlig nivå (låg–mycket hög) utifrån typiska halter i livsmedlet.
               </p>
               {bonusList.length === 0 && <p style={{ fontSize: 12.5, color: C.textFaint }}>Inget upptäckt än idag.</p>}
               {bonusList.map((b) => {
