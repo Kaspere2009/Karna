@@ -45,7 +45,11 @@ const C = {
   ringFat: "#7ED08A",
 };
 
-function dateKey(d) { return d.toISOString().slice(0, 10); }
+function dateKey(d) {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 function getMonday(d) { const day = d.getDay() || 7; const m = new Date(d); m.setHours(0, 0, 0, 0); m.setDate(d.getDate() - day + 1); return m; }
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 function fmtDayNum(d) { return d.getDate(); }
@@ -59,6 +63,19 @@ function displayWeight(kg, unit) { if (kg === "" || kg === undefined || isNaN(Nu
 function displayHeight(cm, unit) { if (cm === "" || cm === undefined || isNaN(Number(cm))) return ""; return unit === "ft" ? cmToIn(Number(cm)) : Number(cm); }
 function parseWeightInput(val, unit) { const n = Number(val); if (isNaN(n)) return ""; return String(unit === "lbs" ? lbsToKg(n) : n); }
 function parseHeightInput(val, unit) { const n = Number(val); if (isNaN(n)) return ""; return String(unit === "ft" ? inToCm(n) : n); }
+
+// ---------- land ----------
+const COUNTRIES = [
+  { v: "SE", l: "Sverige" }, { v: "NO", l: "Norge" }, { v: "DK", l: "Danmark" }, { v: "FI", l: "Finland" },
+  { v: "DE", l: "Tyskland" }, { v: "GB", l: "Storbritannien" }, { v: "US", l: "USA" }, { v: "OTHER", l: "Annat land" },
+];
+function guessCountry() {
+  const lang = (typeof navigator !== "undefined" && navigator.language) || "";
+  const code = (lang.split("-")[1] || "").toUpperCase();
+  if (COUNTRIES.some((c) => c.v === code)) return code;
+  if (lang.startsWith("sv")) return "SE";
+  return "OTHER";
+}
 
 // ---------- Supabase (via REST API — no SDK needed) ----------
 const SUPABASE_URL = "https://clwdczzwsvowsfpaijjm.supabase.co";
@@ -496,12 +513,12 @@ async function lookupBarcode(code) {
   }
 }
 
-async function lookupFoodDatabase(name) {
+async function lookupFoodDatabase(name, country) {
   try {
     const res = await fetch("/api/food-lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: name }),
+      body: JSON.stringify({ query: name, country: country && country !== "OTHER" ? country : null }),
     });
     return await res.json();
   } catch (e) {
@@ -687,7 +704,7 @@ export default function DotApp() {
 
   const [profileInfo, setProfileInfo] = useState({
     name: "", age: "", sex: "kvinna", height: "", weight: "",
-    activity: "moderat", goal: [],
+    activity: "moderat", goal: [], country: guessCountry(),
   });
   const [profileStep, setProfileStep] = useState(0);
   const [targets, setTargets] = useState(DAILY_TARGETS);
@@ -726,6 +743,7 @@ export default function DotApp() {
   const [show100, setShow100] = useState(false);
   const [candidates, setCandidates] = useState([]); // databasträffar att välja bland
   const [scanned, setScanned] = useState(null); // produkt från streckkodsskanning
+  const [searchNote, setSearchNote] = useState(""); // t.ex. "visar träffar för kiwi" 
 
   const ACTIVITY_MULT = { stillasittande: 1.2, lätt: 1.375, moderat: 1.55, aktiv: 1.725, "mycket aktiv": 1.9 };
 
@@ -790,6 +808,7 @@ export default function DotApp() {
       setProfileInfo({
         name: "", age: String(p.age || ""), sex: p.sex || "kvinna", height: String(p.height_cm || ""),
         weight: String(p.weight_kg || ""), activity: p.activity || "moderat", goal: p.goals || [],
+        country: p.country || guessCountry(),
       });
       setTargets({
         kcal: p.target_kcal || DAILY_TARGETS.kcal, protein_g: p.target_protein_g || DAILY_TARGETS.protein_g,
@@ -844,7 +863,7 @@ export default function DotApp() {
           id: session.user.id, age, height_cm: height, weight_kg: weight, sex: profileInfo.sex,
           activity: profileInfo.activity, goals: profileInfo.goal, target_kcal: kcal,
           target_protein_g: protein_g, target_carbs_g: finalCarbs, target_fat_g: fat_g,
-          units_weight: units.weight, units_height: units.height,
+          units_weight: units.weight, units_height: units.height, country: profileInfo.country || null,
         },
       }).catch((e) => { console.error("Kunde inte spara profilen:", e.message); setSyncError("Kunde inte spara profilen: " + e.message); });
     }
@@ -970,8 +989,18 @@ export default function DotApp() {
 
     setLoading(true); setError(""); setCandidates([]);
     const query = normalizeQuery(name);
-    const [lookup, remembered] = await Promise.all([lookupFoodDatabase(name), loadChoices(session, query)]);
-    const merged = mergeCandidates(remembered, lookup.results);
+    const [lookup, remembered] = await Promise.all([lookupFoodDatabase(name, profileInfo.country), loadChoices(session, query)]);
+    let merged = mergeCandidates(remembered, lookup.results);
+    setSearchNote("");
+    // inga träffar på hela texten ("kiwi med skal") → försök med första ordet ("kiwi")
+    const words = name.split(/\s+/).filter(Boolean);
+    if (merged.length === 0 && words.length > 1) {
+      const shorter = await lookupFoodDatabase(words[0], profileInfo.country);
+      if ((shorter.results || []).length) {
+        merged = shorter.results;
+        setSearchNote(`Inga träffar för "${name}" — visar träffar för "${words[0]}".`);
+      }
+    }
     setLoading(false);
     setCandidates(merged);
     const ctx = { name, amount, unit };
@@ -1195,7 +1224,7 @@ export default function DotApp() {
             )}
 
             {page === "profile" && (() => {
-              const STEPS = ["sex", "age", "height", "weight", "activity", "goal"];
+              const STEPS = ["country", "sex", "age", "height", "weight", "activity", "goal"];
               const step = STEPS[profileStep];
               const stepValid = {
                 sex: !!profileInfo.sex,
@@ -1204,6 +1233,7 @@ export default function DotApp() {
                 weight: !!profileInfo.weight,
                 activity: !!profileInfo.activity,
                 goal: profileInfo.goal.length > 0,
+                country: !!profileInfo.country,
               }[step];
               const goBack = () => profileStep === 0 ? setPage("login") : setProfileStep((s) => s - 1);
               const goNext = () => profileStep === STEPS.length - 1 ? calcTargets() : setProfileStep((s) => s + 1);
@@ -1225,6 +1255,14 @@ export default function DotApp() {
                   </div>
 
                   <div className="fade-up" key={step} style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                    {step === "country" && (
+                      <>
+                        <p style={onbQ}>Var bor du?</p>
+                        <p style={onbSub}>Då visar vi livsmedel och varor från ditt land först när du loggar.</p>
+                        <ChipGroup options={COUNTRIES} value={profileInfo.country}
+                          onChange={(v) => setProfileInfo((p) => ({ ...p, country: v }))} large stack />
+                      </>
+                    )}
                     {step === "sex" && (
                       <>
                         <p style={onbQ}>Vilket kön har du?</p>
@@ -1346,22 +1384,26 @@ export default function DotApp() {
           units={units} setUnits={setUnits}
           onDeleteAccount={async () => {
             if (session) {
-              const uid = session.user.id;
               try {
-                await Promise.all([
-                  supabaseRest("daily_logs", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
-                  supabaseRest("day_info", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
-                  supabaseRest("saved_meals", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
-                  supabaseRest("food_choices", { method: "DELETE", accessToken: session.access_token, params: { user_id: `eq.${uid}` } }),
-                  supabaseRest("profiles", { method: "DELETE", accessToken: session.access_token, params: { id: `eq.${uid}` } }),
-                ]);
-              } catch (e) { console.error("Kunde inte radera all data:", e.message); }
+                const res = await fetch("/api/delete-account", {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${session.access_token}` },
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || "Okänt fel");
+              } catch (e) {
+                console.error("Kunde inte radera kontot:", e.message);
+                setSyncError("Kunde inte radera kontot: " + e.message + " Försök igen om en stund.");
+                return;
+              }
             }
+            saveStoredSession(null);
             setSession(null); setDataLoaded(false);
             setDayFoodLogs({}); setWeekLog({}); setSavedMeals([]);
-            setProfileInfo({ name: "", age: "", sex: "kvinna", height: "", weight: "", activity: "moderat", goal: [] });
+            setProfileInfo({ name: "", age: "", sex: "kvinna", height: "", weight: "", activity: "moderat", goal: [], country: guessCountry() });
             setTargets(DAILY_TARGETS); setUnits({ weight: "kg", height: "cm" });
             setAuthInfo({ email: "", password: "" });
+            setProfileStep(0);
             setPage("login");
           }}
         />
@@ -1384,7 +1426,7 @@ export default function DotApp() {
 
       {page === "meal-builder" && (
         <MealBuilderPage
-          mealName={mealName} setMealName={setMealName} session={session}
+          mealName={mealName} setMealName={setMealName} session={session} country={profileInfo.country}
           ingredients={mealIngredients} setIngredients={setMealIngredients}
           onCancel={() => setPage("meals")}
           onSave={async (meal) => {
@@ -1414,7 +1456,7 @@ export default function DotApp() {
 
       {page === "progress" && (
         <ProgressPage
-          dailyLog={dailyLog} weekLog={weekLog} setWeekLog={setWeekLog}
+          dailyLog={dailyLog} dayFoodLogs={dayFoodLogs} weekLog={weekLog} setWeekLog={setWeekLog}
           selectedDay={selectedDay} setSelectedDay={setSelectedDay} goals={profileInfo.goal} units={units} session={session}
         />
       )}
@@ -1648,6 +1690,7 @@ export default function DotApp() {
             <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>
               Träffar för "{foodName}" — värdena är per 100 g. Du loggar {weight} {UNIT_LABELS[weightUnit]}.
             </p>
+            {searchNote && <p style={{ fontSize: 12, color: C.estimate, marginTop: -8, marginBottom: 14 }}>{searchNote}</p>}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
               {candidates.map((c) => (
                 <CandidateButton key={c.id} c={c} disabled={loading} onPick={() => finishManual(c)} />
@@ -2058,7 +2101,7 @@ const COMPOUNDS = [
   { name: "L-teanin", reason: "Aminosyra i te som ger ett lugnt fokus och kan mildra koffeinets påslag.",
     foods: [[["matcha"], 5], [["grönt te", "grön te", "green tea", "tea, green"], 4], [["vitt te", "white tea"], 4],
             [["svart te", "black tea", "tea, black", "oolong"], 3]] },
-  { name: "Koffein", reason: "Pigger upp och skärper fokus. Sent på dagen kan det störa sömnen.",
+  { name: "Koffein", reason: "Pigger upp och skärper fokus. Sent på dagen kan det störa sömnen, och för mycket kan ge oro, hjärtklappning och huvudvärk. För de flesta vuxna räknas upp till cirka 400 mg om dagen (ungefär fyra koppar kaffe) som en säker mängd — lagom är bäst.",
     foods: [[["espresso"], 5], [["kaffe", "coffee"], 5], [["energidryck", "energy drink"], 4], [["matcha"], 4],
             [["svart te", "black tea", "tea, black"], 3], [["grönt te", "grön te", "green tea", "tea, green"], 3],
             [["cola"], 2], [["mörk choklad", "dark chocolate", "chocolate, dark"], 2], [["kakao", "cocoa"], 2]] },
@@ -2289,6 +2332,10 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
           <input value={displayWeight(profileInfo.weight, units.weight)} inputMode="decimal"
             onChange={(e) => setProfileInfo((p) => ({ ...p, weight: parseWeightInput(e.target.value.replace(",", ".").replace(/[^0-9.]/g, ""), units.weight) }))}
             style={{ ...onbInput, marginBottom: 4 }} />
+
+          <label style={onbLabel}>Land</label>
+          <ChipGroup options={COUNTRIES} value={profileInfo.country}
+            onChange={(v) => setProfileInfo((p) => ({ ...p, country: v }))} />
 
           <label style={onbLabel}>Kön</label>
           <ChipGroup
@@ -2623,7 +2670,7 @@ function HistoryPage({ dayFoodLogs, weekLog, units = { weight: "kg", height: "cm
   );
 }
 
-function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, onCancel, onSave, session }) {
+function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, onCancel, onSave, session, country }) {
   const [adding, setAdding] = useState(ingredients.length === 0);
   const [ingName, setIngName] = useState("");
   const [ingWeight, setIngWeight] = useState("");
@@ -2642,7 +2689,7 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
   async function addIngredient() {
     if (!ingName.trim() || !ingWeight.trim()) return;
     setIngLoading(true); setIngError(""); setIngCandidates([]);
-    const [lookup, remembered] = await Promise.all([lookupFoodDatabase(ingName), loadChoices(session, normalizeQuery(ingName))]);
+    const [lookup, remembered] = await Promise.all([lookupFoodDatabase(ingName, country), loadChoices(session, normalizeQuery(ingName))]);
     const results = mergeCandidates(remembered, lookup.results);
     setIngLoading(false);
     if (results.length > 0) {
@@ -2891,7 +2938,7 @@ function MealsPage({ savedMeals, setSavedMeals, onLogMeal, onCreateNew, session 
   );
 }
 
-function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedDay, goals = [], units = { weight: "kg", height: "cm" }, session }) {
+function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selectedDay, setSelectedDay, goals = [], units = { weight: "kg", height: "cm" }, session }) {
   const monday = getMonday(new Date());
   const weekDates = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(monday, i));
   const todayKey = dateKey(new Date());
@@ -2930,16 +2977,18 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
     return "Vikten rörde sig en del denna vecka — helt normalt, följ trenden över flera veckor.";
   }
 
-  // today's real numbers come from the food log; other days have no history yet in this prototype
-  const kcalToday = dailyLog.reduce((s, e) => s + (e.kcal || 0), 0);
-  const vitaminTotals = sumMicroAmounts(dailyLog, VITAMINS);
-  const mineralTotals = sumMicroAmounts(dailyLog, MINERALS);
+  // siffrorna för den valda dagen, från matloggningen
+  const dayLog = dayFoodLogs[selectedDay] || (isToday ? dailyLog : []);
+  const kcalToday = dayLog.reduce((s, e) => s + (e.kcal || 0), 0);
+  const vitaminTotals = sumMicroAmounts(dayLog, VITAMINS);
+  const mineralTotals = sumMicroAmounts(dayLog, MINERALS);
   const avgPct = (defs, totals) => {
     const pcts = defs.map((d) => Math.min(((totals[d.key] || 0) / d.rdi) * 100, 100));
     return Math.round(pcts.reduce((s, p) => s + p, 0) / pcts.length);
   };
-  const vitaminPct = isToday ? avgPct(VITAMINS, vitaminTotals) : 0;
-  const mineralPct = isToday ? avgPct(MINERALS, mineralTotals) : 0;
+  const hasFood = dayLog.length > 0;
+  const vitaminPct = hasFood ? avgPct(VITAMINS, vitaminTotals) : 0;
+  const mineralPct = hasFood ? avgPct(MINERALS, mineralTotals) : 0;
 
   function updateDay(field, value) {
     setWeekLog((w) => {
@@ -3078,18 +3127,18 @@ function ProgressPage({ dailyLog, weekLog, setWeekLog, selectedDay, setSelectedD
         })}
       </div>
 
-      {!isToday && (
+      {!hasFood && (
         <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 14 }}>
-          Ingen historik för den här dagen än i prototypen — kalorier/vitaminer/mineraler visas bara live för idag.
+          Ingen mat loggad den här dagen.
         </p>
       )}
 
       <div style={{ ...glass, borderRadius: 16, padding: 18, marginBottom: 14 }}>
         <p style={{ fontSize: 12, color: C.textDim, marginBottom: 14 }}>Från matloggningen</p>
         <div style={{ display: "flex", gap: 10 }}>
-          <MiniStat label="Kalorier" value={isToday ? Math.round(kcalToday) : "–"} unit="kcal" color={C.accent} />
-          <MiniStat label="Vitaminer" value={isToday ? vitaminPct : "–"} unit="%" color={C.vitamin} />
-          <MiniStat label="Mineraler" value={isToday ? mineralPct : "–"} unit="%" color={C.mineral} />
+          <MiniStat label="Kalorier" value={hasFood ? Math.round(kcalToday) : "–"} unit="kcal" color={C.accent} />
+          <MiniStat label="Vitaminer" value={hasFood ? vitaminPct : "–"} unit="%" color={C.vitamin} />
+          <MiniStat label="Mineraler" value={hasFood ? mineralPct : "–"} unit="%" color={C.mineral} />
         </div>
       </div>
 
