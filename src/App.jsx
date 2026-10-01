@@ -920,6 +920,7 @@ export default function DotApp() {
     const r1 = (v) => Math.round((Number(v) || 0) * factor * 10) / 10;
     const scaled = { ...entry, grams: newGrams ?? (entry.grams ? Math.round(entry.grams * factor) : null) };
     KNOWN_FIELDS.forEach(({ key }) => { scaled[key] = r1(entry[key]); });
+    scaled.bonus = (entry.bonus || []).map((b) => (typeof b.qty === "number" ? { ...b, qty: b.qty * factor } : b));
     scaled.microAmounts = Object.fromEntries(Object.entries(entry.microAmounts || {}).map(([k, v]) => [k, Math.round((Number(v) || 0) * factor * 1000) / 1000]));
     setDayFoodLogs((logs) => ({ ...logs, [dayKey]: (logs[dayKey] || []).map((e) => (sameEntry(e, entry) ? scaled : e)) }));
     if (session && entry.id) {
@@ -987,18 +988,35 @@ export default function DotApp() {
       return;
     }
 
+    // har du fyllt i värden från förpackningen används BARA dem — ingen databasvara blandas in
+    const hasOwnValues = KNOWN_FIELDS.some(({ key }) => known100[key] !== undefined && String(known100[key]).trim() !== "");
+    if (hasOwnValues) {
+      setCandidates([]); setSearchNote("");
+      await finishManual(null, { name, amount, unit });
+      return;
+    }
+
     setLoading(true); setError(""); setCandidates([]);
     const query = normalizeQuery(name);
     const [lookup, remembered] = await Promise.all([lookupFoodDatabase(name, profileInfo.country), loadChoices(session, query)]);
     let merged = mergeCandidates(remembered, lookup.results);
     setSearchNote("");
-    // inga träffar på hela texten ("kiwi med skal") → försök med första ordet ("kiwi")
-    const words = name.split(/\s+/).filter(Boolean);
+    // inga träffar på hela texten → prova kortare varianter: "arla feta ost" → "arla feta", "kiwi med skal" → "kiwi"
+    const words = name.toLowerCase().split(/\s+/).filter(Boolean);
     if (merged.length === 0 && words.length > 1) {
-      const shorter = await lookupFoodDatabase(words[0], profileInfo.country);
-      if ((shorter.results || []).length) {
-        merged = shorter.results;
-        setSearchNote(`Inga träffar för "${name}" — visar träffar för "${words[0]}".`);
+      const STOP = new Set(["med", "utan", "och", "m", "u", "m.", "u.", "with", "without", "and", "i", "på", "en", "ett", "a"]);
+      const core = words.filter((w) => !STOP.has(w));
+      const tries = [];
+      if (words.length > 2) tries.push(words.slice(0, -1).join(" "));
+      if (core.length && core.length < words.length) tries.push(core.join(" "));
+      core.filter((w) => w.length >= 3).forEach((w) => tries.push(w));
+      for (const q of [...new Set(tries)].filter((q) => q !== name.toLowerCase())) {
+        const shorter = await lookupFoodDatabase(q, profileInfo.country);
+        if ((shorter.results || []).length) {
+          merged = shorter.results;
+          setSearchNote(`Inga träffar för "${name}" — visar träffar för "${q}".`);
+          break;
+        }
       }
     }
     setLoading(false);
@@ -2065,71 +2083,85 @@ const BONUS_DEFS = [
   { key: "lutein", name: "Lutein & zeaxantin", unit: "µg", min: 300, reason: "Antioxidanter som samlas i ögat och hjälper till att skydda synen." },
   { key: "wholegrain", name: "Fullkorn", unit: "g", min: 5, reason: "Ger fibrer och långsamma kolhydrater som håller dig mätt längre." },
 ];
-// nyttiga ämnen som INTE finns uppmätta i databaserna — visas med nivå i stället för mängd.
-// Nivåerna (1–5) bygger på typiska halter i forskningen (t.ex. USDA:s flavonoiddatabas och Phenol-Explorer).
+// nyttiga ämnen som INTE finns uppmätta i våra databaser.
+// För de flesta anges en ungefärlig typisk halt per 100 g (från forskningsdata, t.ex. USDA:s flavonoiddatabas och
+// Phenol-Explorer). Den räknas om efter mängden du loggat och jämförs med en referensmängd → nivå + "ca X mg".
+// För några (probiotika, capsaicin) finns inget meningsfullt mått, där visas bara en fast nivå.
 const LEVEL_LABELS = { 1: "Mycket låg", 2: "Låg", 3: "Medel", 4: "Hög", 5: "Mycket hög" };
+function levelFromRatio(r) {
+  if (r >= 1) return 5;
+  if (r >= 0.6) return 4;
+  if (r >= 0.3) return 3;
+  if (r >= 0.1) return 2;
+  return 1;
+}
 const COMPOUNDS = [
-  { name: "Katekiner", reason: "Antioxidanter som kan stödja hjärta och blodkärl.",
-    foods: [[["matcha"], 5], [["kakao", "cocoa"], 5], [["grönt te", "grön te", "green tea", "tea, green"], 4],
-            [["mörk choklad", "dark chocolate", "chocolate, dark"], 4], [["svart te", "black tea", "tea, black"], 3],
-            [["äpple", "apple"], 2]] },
-  { name: "Antocyaniner", reason: "Färgämnen i blå och röda bär och grönsaker som fungerar som antioxidanter.",
-    foods: [[["aronia", "chokeberr"], 5], [["blåbär", "blueberr", "bilberr"], 5], [["björnbär", "blackberr"], 5],
-            [["svarta vinbär", "blackcurrant", "currants, european black"], 5], [["rödkål", "red cabbage", "cabbage, red"], 4],
-            [["körsbär", "cherr"], 3], [["hallon", "raspberr"], 3], [["lingon", "lingonberr"], 3],
-            [["jordgubb", "strawberr"], 2], [["röda vindruvor", "red grapes"], 2]] },
-  { name: "Sulforafan", reason: "Bildas när man tuggar korsblommiga grönsaker och stöttar kroppens egna skyddssystem.",
-    foods: [[["broccoligroddar", "broccoli sprouts"], 5], [["broccoli"], 4], [["grönkål", "kale"], 3],
-            [["brysselkål", "brussels sprouts"], 3], [["blomkål", "cauliflower"], 2], [["vitkål"], 2]] },
-  { name: "Allicin", reason: "Svavelförening i vitlök som bildas när den hackas eller krossas.",
-    foods: [[["vitlök", "garlic"], 5]] },
-  { name: "Kvercetin", reason: "Flavonoid med antioxiderande egenskaper, finns rikligt i lök.",
-    foods: [[["kapris", "capers"], 5], [["rödlök", "red onion", "onions, red"], 5], [["gul lök", "onion"], 4],
-            [["grönkål", "kale"], 3], [["äpple", "apple"], 2], [["broccoli"], 2]] },
-  { name: "Kurkumin", reason: "Det gula ämnet i gurkmeja. Tas upp bättre tillsammans med svartpeppar och fett.",
-    foods: [[["gurkmeja", "turmeric"], 5], [["curry"], 2]] },
-  { name: "Probiotika", reason: "Levande mjölksyrabakterier som kan stödja tarmfloran.",
+  { name: "Katekiner", unit: "mg", ref: 300, reason: "Antioxidanterna i te och kakao. Kan stödja hjärta och blodkärl.",
+    foods: [[["matcha"], 6000], [["kakao", "cocoa"], 200], [["grönt te", "grön te", "green tea", "tea, green"], 80],
+            [["mörk choklad", "dark chocolate", "chocolate, dark"], 50], [["vitt te", "white tea"], 60],
+            [["svart te", "black tea", "tea, black"], 15], [["äpple", "apple"], 10]] },
+  { name: "L-teanin", unit: "mg", ref: 100, reason: "Aminosyra i te som ger ett lugnt fokus och kan mildra koffeinets påslag. Effekter ses oftast vid 100–200 mg.",
+    foods: [[["matcha"], 2000], [["grönt te", "grön te", "green tea", "tea, green"], 8], [["vitt te", "white tea"], 10],
+            [["svart te", "black tea", "tea, black", "oolong"], 7]] },
+  { name: "Koffein", unit: "mg", ref: 200, reason: "Pigger upp och skärper fokus. Lagom för de flesta är ungefär 100–200 mg om dagen, helst före lunch — redan runt 100 mg senare på dagen kan försämra sömnen.",
+    foods: [[["espresso"], 212], [["kaffe", "coffee"], 40], [["energidryck", "energy drink"], 32], [["matcha"], 3200],
+            [["svart te", "black tea", "tea, black"], 20], [["grönt te", "grön te", "green tea", "tea, green"], 12],
+            [["cola"], 10], [["mörk choklad", "dark chocolate", "chocolate, dark"], 80], [["kakao", "cocoa"], 230]] },
+  { name: "Klorogensyra", unit: "mg", ref: 200, reason: "Polyfenol med antioxiderande effekt — kaffe är den största källan.",
+    foods: [[["kaffe", "coffee", "espresso"], 70], [["aubergine", "eggplant"], 20], [["blåbär", "blueberr"], 10],
+            [["päron", "pear"], 10], [["äpple", "apple"], 10]] },
+  { name: "Teobromin", unit: "mg", ref: 250, reason: "Milt uppiggande ämne i kakao, mildare och mer långvarigt än koffein.",
+    foods: [[["kakao", "cocoa"], 2000], [["mörk choklad", "dark chocolate", "chocolate, dark"], 800],
+            [["mjölkchoklad", "milk chocolate"], 150]] },
+  { name: "Antocyaniner", unit: "mg", ref: 150, reason: "Färgämnen i blå och röda bär och grönsaker som fungerar som antioxidanter.",
+    foods: [[["aronia", "chokeberr"], 1400], [["blåbär", "bilberr"], 400], [["blueberr"], 160], [["björnbär", "blackberr"], 100],
+            [["svarta vinbär", "blackcurrant", "currants, european black"], 450], [["rödkål", "red cabbage", "cabbage, red"], 110],
+            [["körsbär", "cherr"], 80], [["hallon", "raspberr"], 40], [["lingon", "lingonberr"], 50],
+            [["jordgubb", "strawberr"], 20], [["röda vindruvor", "red grapes"], 30]] },
+  { name: "Ellagitanniner", unit: "mg", ref: 100, reason: "Polyfenoler i bär och nötter som tarmfloran omvandlar till nyttiga ämnen.",
+    foods: [[["granatäpple", "pomegranate"], 100], [["valnöt", "walnut"], 60], [["hallon", "raspberr"], 60],
+            [["björnbär", "blackberr"], 50], [["jordgubb", "strawberr"], 30]] },
+  { name: "Sulforafan", unit: "mg", ref: 20, reason: "Bildas när man tuggar korsblommiga grönsaker och stöttar kroppens egna skyddssystem.",
+    foods: [[["broccoligroddar", "broccoli sprouts"], 50], [["broccoli"], 5], [["grönkål", "kale"], 2],
+            [["brysselkål", "brussels sprouts"], 2], [["blomkål", "cauliflower"], 1], [["vitkål"], 1]] },
+  { name: "Allicin", unit: "mg", ref: 10, reason: "Svavelförening i vitlök som bildas när den hackas eller krossas.",
+    foods: [[["vitlök", "garlic"], 400]] },
+  { name: "Kvercetin", unit: "mg", ref: 30, reason: "Flavonoid med antioxiderande egenskaper, finns rikligt i lök.",
+    foods: [[["kapris", "capers"], 230], [["rödlök", "red onion", "onions, red"], 30], [["gul lök", "onion"], 20],
+            [["grönkål", "kale"], 20], [["äpple", "apple"], 4], [["broccoli"], 3]] },
+  { name: "Kurkumin", unit: "mg", ref: 100, reason: "Det gula ämnet i gurkmeja. Tas upp bättre tillsammans med svartpeppar och fett.",
+    foods: [[["gurkmeja", "turmeric"], 3000], [["curry"], 100]] },
+  { name: "Betaglukan", unit: "g", ref: 3, reason: "Löslig fiber i havre och korn. Runt 3 g om dagen kan bidra till lägre kolesterol.",
+    foods: [[["havre", "oat"], 4], [["korngryn", "pärlgryn", "barley"], 5]] },
+  { name: "Kostnitrat", unit: "mg", ref: 300, reason: "Omvandlas i kroppen till kväveoxid, som vidgar blodkärlen.",
+    foods: [[["ruccola", "rucola", "arugula", "rocket"], 480], [["rödbet", "beetroot", "beets"], 250],
+            [["spenat", "spinach"], 250], [["selleri", "celery"], 150]] },
+  { name: "Olivpolyfenoler", unit: "mg", ref: 10, reason: "Antioxidanter i olivolja, främst i extra jungfruolja.",
+    foods: [[["extra virgin", "extra jungfru"], 50], [["olivolja", "olive oil", "oil, olive"], 10], [["oliver", "olives"], 100]] },
+  { name: "Hesperidin", unit: "mg", ref: 150, reason: "Flavonoid i citrusfrukter som kan stödja blodkärlen.",
+    foods: [[["apelsin", "orange"], 40], [["mandarin", "clementin", "tangerine"], 30],
+            [["citron", "lemon"], 20], [["lime"], 15], [["grapefrukt", "grapefruit"], 3]] },
+  { name: "Gingerol", unit: "mg", ref: 50, reason: "Det starka ämnet i ingefära, kan lindra illamående.",
+    foods: [[["ingefära", "ginger"], 250]] },
+  { name: "Lignaner", unit: "mg", ref: 50, reason: "Växtämnen i fröer och fullkorn med antioxiderande egenskaper.",
+    foods: [[["linfrö", "flaxseed", "flax seed"], 300], [["sesam", "sesame"], 40], [["råg", "rye"], 3]] },
+  { name: "Isoflavoner", unit: "mg", ref: 50, reason: "Växtämnen i soja som kan stödja hjärta och benhälsa.",
+    foods: [[["tempeh"], 60], [["sojabön", "soybean"], 55], [["tofu"], 25], [["edamame"], 20], [["soja", "soy"], 10]] },
+  { name: "Ergotionein", unit: "mg", ref: 5, reason: "Antioxidant som främst finns i svamp.",
+    foods: [[["ostronskivling", "oyster mushroom"], 13], [["shiitake"], 5], [["champinjon", "mushroom"], 1], [["svamp"], 2]] },
+  { name: "Astaxantin", unit: "mg", ref: 4, reason: "Rött färgämne i lax och skaldjur med stark antioxiderande effekt. Vildfångad lax har mycket mer än odlad.",
+    foods: [[["vild lax", "wild salmon", "salmon, sockeye"], 3], [["lax", "salmon"], 0.6], [["röding", "char"], 0.5],
+            [["räkor", "räka", "shrimp"], 0.5], [["kräft", "crayfish"], 1]] },
+  { name: "Kreatin", unit: "mg", ref: 2000, reason: "Ger musklerna snabb energi vid korta, intensiva ansträngningar. Finns i kött och fisk.",
+    foods: [[["sill", "strömming", "herring"], 800], [["nötfärs", "köttfärs", "nötkött", "biff", "entrecote", "oxfilé", "beef"], 450],
+            [["lax", "salmon"], 450], [["tonfisk", "tuna"], 400], [["fläsk", "pork"], 400], [["lamm", "lamb"], 400],
+            [["kyckling", "chicken"], 350], [["kalkon", "turkey"], 350]] },
+  // fasta nivåer — inget meningsfullt mått i mg
+  { name: "Probiotika", fixed: true, reason: "Levande mjölksyrabakterier som kan stödja tarmfloran.",
     foods: [[["kefir"], 5], [["filmjölk"], 4], [["kimchi"], 4], [["surkål", "sauerkraut"], 3],
             [["kombucha"], 3], [["yoghurt", "yogurt"], 3]] },
-  { name: "Betaglukan", reason: "Löslig fiber i havre och korn som kan bidra till lägre kolesterol.",
-    foods: [[["havre", "oat"], 4], [["korngryn", "pärlgryn", "barley"], 4]] },
-  { name: "Kostnitrat", reason: "Omvandlas i kroppen till kväveoxid, som vidgar blodkärlen.",
-    foods: [[["rödbet", "beetroot", "beets"], 5], [["ruccola", "rucola", "arugula", "rocket"], 5],
-            [["spenat", "spinach"], 4], [["selleri", "celery"], 3]] },
-  { name: "Capsaicin", reason: "Det starka ämnet i chili.",
+  { name: "Capsaicin", fixed: true, reason: "Det starka ämnet i chili.",
     foods: [[["cayenne"], 5], [["habanero"], 5], [["chili"], 4], [["jalapeño", "jalapeno"], 3]] },
-  { name: "L-teanin", reason: "Aminosyra i te som ger ett lugnt fokus och kan mildra koffeinets påslag.",
-    foods: [[["matcha"], 5], [["grönt te", "grön te", "green tea", "tea, green"], 4], [["vitt te", "white tea"], 4],
-            [["svart te", "black tea", "tea, black", "oolong"], 3]] },
-  { name: "Koffein", reason: "Pigger upp och skärper fokus. Sent på dagen kan det störa sömnen, och för mycket kan ge oro, hjärtklappning och huvudvärk. För de flesta vuxna räknas upp till cirka 400 mg om dagen (ungefär fyra koppar kaffe) som en säker mängd — lagom är bäst.",
-    foods: [[["espresso"], 5], [["kaffe", "coffee"], 5], [["energidryck", "energy drink"], 4], [["matcha"], 4],
-            [["svart te", "black tea", "tea, black"], 3], [["grönt te", "grön te", "green tea", "tea, green"], 3],
-            [["cola"], 2], [["mörk choklad", "dark chocolate", "chocolate, dark"], 2], [["kakao", "cocoa"], 2]] },
-  { name: "Klorogensyra", reason: "Polyfenol med antioxiderande effekt — kaffe är den största källan.",
-    foods: [[["kaffe", "coffee", "espresso"], 5], [["aubergine", "eggplant"], 3], [["blåbär", "blueberr"], 3],
-            [["päron", "pear"], 2], [["äpple", "apple"], 2]] },
-  { name: "Teobromin", reason: "Milt uppiggande ämne i kakao, mildare och mer långvarigt än koffein.",
-    foods: [[["kakao", "cocoa"], 5], [["mörk choklad", "dark chocolate", "chocolate, dark"], 4],
-            [["mjölkchoklad", "milk chocolate"], 2]] },
-  { name: "Olivpolyfenoler", reason: "Antioxidanter i olivolja, främst i extra jungfruolja.",
-    foods: [[["extra virgin", "extra jungfru"], 5], [["olivolja", "olive oil", "oil, olive"], 4], [["oliver", "olives"], 3]] },
-  { name: "Hesperidin", reason: "Flavonoid i citrusfrukter som kan stödja blodkärlen.",
-    foods: [[["apelsin", "orange"], 4], [["mandarin", "clementin", "tangerine"], 4],
-            [["citron", "lemon"], 3], [["lime"], 3], [["grapefrukt", "grapefruit"], 3]] },
-  { name: "Gingerol", reason: "Det starka ämnet i ingefära, kan lindra illamående.",
-    foods: [[["ingefära", "ginger"], 5]] },
-  { name: "Lignaner", reason: "Växtämnen i fröer och fullkorn med antioxiderande egenskaper.",
-    foods: [[["linfrö", "flaxseed", "flax seed"], 5], [["sesam", "sesame"], 4], [["råg", "rye"], 2]] },
-  { name: "Isoflavoner", reason: "Växtämnen i soja som kan stödja hjärta och benhälsa.",
-    foods: [[["sojabön", "soybean", "tempeh"], 5], [["tofu"], 4], [["edamame"], 4], [["soja", "soy"], 3]] },
-  { name: "Ergotionein", reason: "Antioxidant som främst finns i svamp.",
-    foods: [[["ostronskivling", "oyster mushroom"], 5], [["shiitake"], 4], [["champinjon", "mushroom"], 3], [["svamp"], 3]] },
-  { name: "Astaxantin", reason: "Rött färgämne i lax och skaldjur med stark antioxiderande effekt.",
-    foods: [[["vild lax", "wild salmon", "salmon, sockeye"], 5], [["lax", "salmon"], 4], [["röding", "char"], 3],
-            [["räkor", "räka", "shrimp"], 3], [["kräft", "crayfish"], 3]] },
-  { name: "Ellagitanniner", reason: "Polyfenoler i bär och nötter som tarmfloran omvandlar till nyttiga ämnen.",
-    foods: [[["granatäpple", "pomegranate"], 5], [["valnöt", "walnut"], 4], [["hallon", "raspberr"], 3],
-            [["björnbär", "blackberr"], 3], [["jordgubb", "strawberr"], 3]] },
 ];
 
 // ordet måste börja ett ord i namnet: "havre" hittar "havregryn", men "oat" hittar inte "goat" och "apple" inte "pineapple"
@@ -2139,16 +2171,24 @@ function startsWord(text, word) {
 }
 
 // vilka av ämnena ovan ett livsmedel innehåller, utifrån dess namn
-function compoundsFor(...texts) {
-  const t = texts.filter(Boolean).join(" | ").toLowerCase();
+function compoundsFor(texts, grams) {
+  const t = (Array.isArray(texts) ? texts : [texts]).filter(Boolean).join(" | ").toLowerCase();
   if (!t) return [];
+  const g = Number(grams) > 0 ? Number(grams) : 100; // äldre loggar utan vikt räknas som 100 g
   const out = [];
   COMPOUNDS.forEach((c) => {
-    let level = 0;
-    c.foods.forEach(([words, lvl]) => { if (lvl > level && words.some((w) => startsWord(t, w))) level = lvl; });
-    if (level) out.push({ name: c.name, level, amount: LEVEL_LABELS[level], reason: c.reason });
+    let best = 0;
+    c.foods.forEach(([words, v]) => { if (v > best && words.some((w) => startsWord(t, w))) best = v; });
+    if (!best) return;
+    if (c.fixed) out.push({ name: c.name, level: best, reason: c.reason, fixed: true });
+    else out.push({ name: c.name, qty: (best * g) / 100, unit: c.unit, reason: c.reason });
   });
   return out;
+}
+
+function formatQty(v, unit) {
+  const n = v >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
+  return `ca ${n.toLocaleString("sv-SE")} ${unit}`;
 }
 
 function formatBonusAmount(v, unit) {
@@ -2164,29 +2204,35 @@ function sumBonus(dailyLog) {
   });
   const totals = {};
   dailyLog.forEach((entry) => {
-    const found = [...compoundsFor(entry.name, entry.matchedName).map((b) => ({ ...b, from: entry.name })), ...(entry.bonus || [])];
+    const found = [
+      ...compoundsFor([entry.name, entry.matchedName], entry.grams).map((b) => ({ ...b, from: entry.name })),
+      ...(entry.bonus || []),
+    ];
     found.forEach((b) => {
       if (!b.name) return;
-      const cur = totals[b.name];
-      if (!cur) {
-        totals[b.name] = { name: b.name, amount: b.amount, reason: b.reason, level: b.level || 0, from: new Set(b.from ? [b.from] : []) };
-        return;
-      }
+      const cur = totals[b.name] || (totals[b.name] = { name: b.name, reason: b.reason, qty: 0, level: 0, amount: null, from: new Set() });
       if (b.from) cur.from.add(b.from);
-      if (b.level) {
-        if (b.level > (cur.level || 0)) { cur.level = b.level; cur.amount = b.amount; }
-      } else if (b.amount && !cur.level) {
-        cur.amount = b.amount;
-      }
+      if (typeof b.qty === "number") { cur.qty += b.qty; cur.unit = b.unit; }
+      else if (b.level) cur.level = Math.max(cur.level, b.level);
+      else if (b.amount && !cur.amount) cur.amount = b.amount; // t.ex. från AI senare
       if (b.reason && !cur.reason) cur.reason = b.reason;
     });
   });
-  const qualitative = Object.values(totals).map((b) => ({
-    name: b.name,
-    amount: b.amount,
-    level: b.level,
-    reason: b.from && b.from.size ? `${b.reason || ""} Finns i: ${[...b.from].join(", ")}.`.trim() : b.reason,
-  }));
+  const qualitative = Object.values(totals).map((b) => {
+    const def = COMPOUNDS.find((c) => c.name === b.name);
+    let amount = b.amount;
+    let level = b.level;
+    if (b.qty > 0 && def && def.ref) {
+      level = levelFromRatio(b.qty / def.ref);
+      amount = `${LEVEL_LABELS[level]} · ${formatQty(b.qty, b.unit || def.unit)}`;
+    } else if (level) {
+      amount = LEVEL_LABELS[level];
+    }
+    return {
+      name: b.name, amount, level,
+      reason: b.from.size ? `${b.reason || ""} Finns i: ${[...b.from].join(", ")}.`.trim() : b.reason,
+    };
+  });
   const dbNames = new Set(fromDb.map((b) => b.name.toLowerCase()));
   return [...fromDb, ...qualitative.filter((b) => !dbNames.has(b.name.toLowerCase()))];
 }
@@ -2208,7 +2254,7 @@ function BarRow({ label, value, max, unit, color, colorDim, sublabel }) {
   );
 }
 
-function MicroRow({ def, amount, color, colorDim, open, onToggle }) {
+function MicroRow({ def, amount, color, colorDim, open, onToggle, noData }) {
   const pct = Math.round((amount / def.rdi) * 100);
   const barPct = Math.min(100, pct);
   return (
@@ -2227,8 +2273,8 @@ function MicroRow({ def, amount, color, colorDim, open, onToggle }) {
             i
           </button>
         </div>
-        <span style={{ ...mono, fontSize: 11.5, color: C.textDim }}>
-          {Math.round(amount * 10) / 10}{def.unit} · {pct}%
+        <span style={{ ...mono, fontSize: 11.5, color: noData ? C.textFaint : C.textDim }}>
+          {noData ? "ingen data" : `${Math.round(amount * 10) / 10}${def.unit} · ${pct}%`}
         </span>
       </div>
       <div style={{ height: 6, borderRadius: 4, background: colorDim, overflow: "hidden" }}>
@@ -2237,6 +2283,7 @@ function MicroRow({ def, amount, color, colorDim, open, onToggle }) {
       {open && (
         <p className="fade-up" style={{ fontSize: 11.5, color: C.textDim, marginTop: 6, marginBottom: 0, paddingLeft: 2 }}>
           {def.blurb}
+          {noData && " Det här ämnet finns inte uppmätt för det du loggat idag, så vi kan inte visa någon mängd — det betyder inte att du får för lite."}
         </p>
       )}
     </div>
@@ -2727,9 +2774,11 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
     });
     const bonusMap = {};
     ingredients.forEach((ing) => {
-      [...compoundsFor(ing.name, ing.matchedName), ...(ing.bonus || [])].forEach((b) => {
+      [...compoundsFor([ing.name, ing.matchedName], ing.estimatedGrams), ...(ing.bonus || [])].forEach((b) => {
         const cur = bonusMap[b.name];
-        if (!cur || (b.level || 0) > (cur.level || 0)) bonusMap[b.name] = b;
+        if (!cur) bonusMap[b.name] = { ...b };
+        else if (typeof b.qty === "number") cur.qty = (cur.qty || 0) + b.qty;
+        else if ((b.level || 0) > (cur.level || 0)) cur.level = b.level;
       });
     });
     const bonus = Object.values(bonusMap);
@@ -3430,6 +3479,7 @@ function Dashboard({ dailyLog, targets }) {
               {VITAMINS.map((v) => (
                 <MicroRow
                   key={v.key} def={v} amount={vitaminTotals[v.key] || 0}
+                  noData={dailyLog.length > 0 && !dailyLog.some((e) => (e.microAmounts || {})[v.key] !== undefined)}
                   color={C.vitamin} colorDim={C.vitaminDim}
                   open={openInfo === v.key} onToggle={() => toggle(v.key)}
                 />
@@ -3444,6 +3494,7 @@ function Dashboard({ dailyLog, targets }) {
               {MINERALS.map((m) => (
                 <MicroRow
                   key={m.key} def={m} amount={mineralTotals[m.key] || 0}
+                  noData={dailyLog.length > 0 && !dailyLog.some((e) => (e.microAmounts || {})[m.key] !== undefined)}
                   color={C.mineral} colorDim={C.mineralDim}
                   open={openInfo === m.key} onToggle={() => toggle(m.key)}
                 />
