@@ -236,7 +236,12 @@ async function searchOpenFoodFacts(term, country) {
   const words = term.toLowerCase().split(/\s+/).filter(Boolean);
   return (data.products || [])
     .filter((p) => p.product_name && p.nutriments && (p.nutriments["energy-kcal_100g"] ?? p.nutriments["energy-kcal"]) != null)
-    .filter((p) => words.every((w) => p.product_name.toLowerCase().includes(w)))
+    // orden får finnas i produktnamnet ELLER märket ("arla feta" → Feta från Arla); vid 3+ ord får ett ord saknas ("ost")
+    .filter((p) => {
+      const text = `${p.product_name} ${p.brands || ""}`.toLowerCase();
+      const hits = words.filter((w) => text.includes(w)).length;
+      return hits >= (words.length >= 3 ? words.length - 1 : words.length);
+    })
     // varor som säljs i användarens land först
     .map((p, i) => ({ p, i, local: OFF_COUNTRY_TAGS[country] && (p.countries_tags || []).includes(OFF_COUNTRY_TAGS[country]) ? 1 : 0 }))
     .sort((a, b) => b.local - a.local || a.i - b.i)
