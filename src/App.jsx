@@ -1415,7 +1415,7 @@ export default function DotApp() {
         </div>
       </div>
 
-      {page === "dashboard" && <Dashboard dailyLog={dailyLog} targets={targets} />}
+      {page === "dashboard" && <Dashboard dailyLog={dailyLog} targets={targets} weightKg={parseFloat(profileInfo.weight) || 75} />}
 
       {page === "settings" && (
         <SettingsPage
@@ -2256,10 +2256,19 @@ function sumBonus(dailyLog) {
   });
   const totals = {};
   dailyLog.forEach((entry) => {
-    const found = [
-      ...compoundsFor([entry.name, entry.matchedName], entry.grams).map((b) => ({ ...b, from: entry.name })),
-      ...(entry.bonus || []),
-    ];
+    const m = entry.microAmounts || {};
+    const est = compoundsFor([entry.name, entry.matchedName], entry.grams);
+    // uppmätta värden (USDA) går före uppskattningen
+    [["Koffein", "caffeine"], ["Teobromin", "theobromine"]].forEach(([cname, key]) => {
+      if (typeof m[key] !== "number") return;
+      const i = est.findIndex((b) => b.name === cname);
+      if (i >= 0) est[i] = { ...est[i], qty: m[key] };
+      else if (m[key] > 0) {
+        const def = COMPOUNDS.find((c) => c.name === cname);
+        est.push({ name: cname, qty: m[key], unit: "mg", reason: def.reason });
+      }
+    });
+    const found = [...est.map((b) => ({ ...b, from: entry.name })), ...(entry.bonus || [])];
     found.forEach((b) => {
       if (!b.name) return;
       const cur = totals[b.name] || (totals[b.name] = { name: b.name, reason: b.reason, qty: 0, level: 0, amount: null, from: new Set() });
@@ -3508,7 +3517,98 @@ function MiniStat({ label, value, unit, color }) {
   );
 }
 
-function Dashboard({ dailyLog, targets }) {
+// ---------- fler uppmätta värden: fetter, socker & salt, aminosyror, övrigt ----------
+// behov av essentiella aminosyror i mg per kg kroppsvikt och dag (WHO/FAO/UNU 2007)
+const AMINO_ACIDS = [
+  { key: "leu", name: "Leucin", perKg: 39, blurb: "Den viktigaste aminosyran för att bygga muskler — den sätter igång muskelproteinsyntesen." },
+  { key: "ile", name: "Isoleucin", perKg: 20, blurb: "Hjälper musklerna med energi och återhämtning." },
+  { key: "val", name: "Valin", perKg: 26, blurb: "Stöttar muskler och återhämtning tillsammans med leucin och isoleucin." },
+  { key: "lys", name: "Lysin", perKg: 30, blurb: "Behövs för kollagen, kalciumupptag och immunförsvar. Kan vara knapp i växtbaserad kost." },
+  { key: "met", name: "Metionin", perKg: 10.4, blurb: "Innehåller svavel och behövs för att bygga många andra ämnen i kroppen." },
+  { key: "phe", name: "Fenylalanin", perKg: 25, blurb: "Byggsten för signalämnen som dopamin och noradrenalin." },
+  { key: "thr", name: "Treonin", perKg: 15, blurb: "Behövs för kollagen, elastin och tarmens slemhinna." },
+  { key: "trp", name: "Tryptofan", perKg: 4, blurb: "Byggsten för serotonin och melatonin — kopplat till humör och sömn." },
+  { key: "his", name: "Histidin", perKg: 10, blurb: "Behövs för blodbildning och för att bilda histamin." },
+];
+
+function MorePage({ dailyLog, weightKg, openInfo, toggle }) {
+  const n = dailyLog.length;
+  const sumKey = (k) => dailyLog.reduce((s, e) => s + (Number((e.microAmounts || {})[k]) || 0), 0);
+  const covered = (k) => dailyLog.filter((e) => typeof (e.microAmounts || {})[k] === "number").length;
+  const cov = (k) => {
+    const c = covered(k);
+    return c > 0 && c < n ? `data för ${c} av ${n} livsmedel` : null;
+  };
+  const fmt = (v, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toLocaleString("sv-SE");
+
+  const omega3 = sumKey("omega3");
+  const omega6 = sumKey("omega6");
+  const ratio = omega3 > 0 && omega6 > 0 ? omega6 / omega3 : null;
+  const salt = (sumKey("sodium") * 2.54) / 1000;
+
+  const rows = [
+    { section: "Fetter" },
+    { key: "mufa", name: "Enkelomättat fett", value: sumKey("mufa"), unit: "g", blurb: "Finns bland annat i olivolja, rapsolja, nötter och avokado." },
+    { key: "pufa", name: "Fleromättat fett", value: sumKey("pufa"), unit: "g", blurb: "Hit hör omega-3 och omega-6. Finns i fisk, nötter, frön och vegetabiliska oljor." },
+    { key: "omega6", name: "Omega-6", value: omega6 / 1000, unit: "g", blurb: "Livsnödvändig fettsyra, bland annat i vegetabiliska oljor, nötter och kött." },
+    { key: "ratio", name: "Omega-6 : omega-3", text: ratio ? `${fmt(ratio)} : 1` : "–", blurb: "Förhållandet mellan fettsyrorna. Många forskare menar att en jämnare balans, till exempel under 4:1, är fördelaktig. Fet fisk, valnötter och rapsolja sänker kvoten." },
+    { key: "cholesterol", name: "Kolesterol", value: sumKey("cholesterol"), unit: "mg", d: 0, blurb: "Kolesterol från maten påverkar blodvärdena mindre än man tidigare trodde för de flesta. Kroppen tillverkar själv det mesta den behöver." },
+    { section: "Socker & salt" },
+    { key: "added_sugar", name: "Tillsatt socker", value: sumKey("added_sugar"), unit: "g", blurb: "Socker som tillsatts vid tillverkning eller matlagning, till skillnad från det som finns naturligt i frukt och mjölk." },
+    { key: "sodium", name: "Salt", value: salt, unit: "g", blurb: "Räknas ut från natriumet. Livsmedelsverkets riktmärke för vuxna är högst 6 g salt om dagen." },
+    { section: "Övrigt" },
+    { key: "water", name: "Vätska från maten", value: sumKey("water") / 1000, unit: "l", d: 2, blurb: "Vatten som finns i maten och dryckerna du loggat. Utöver det behöver du dricka vatten." },
+    { key: "alcohol", name: "Alkohol", value: sumKey("alcohol"), unit: "g", blurb: "Gram ren alkohol. Ett standardglas (t.ex. 33 cl starköl eller 15 cl vin) innehåller ungefär 12 g." },
+  ];
+
+  const hasAminos = dailyLog.some((e) => typeof (e.microAmounts || {}).leu === "number");
+
+  return (
+    <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
+      <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 14, color: C.accent }}>Fett, salt & protein idag</p>
+      {n === 0 && <p style={{ fontSize: 12.5, color: C.textFaint }}>Inget loggat än idag.</p>}
+      {n > 0 && rows.map((r, i) => {
+        if (r.section) return <p key={i} style={{ fontSize: 11, color: C.textFaint, textTransform: "uppercase", letterSpacing: "0.04em", margin: i ? "16px 0 6px" : "0 0 6px" }}>{r.section}</p>;
+        const dataKey = r.key === "ratio" ? "omega6" : r.key;
+        if (r.key !== "ratio" && covered(dataKey) === 0) return null;
+        const open = openInfo === `more-${r.key}`;
+        const note = r.key === "ratio" ? null : cov(dataKey);
+        return (
+          <div key={r.key} style={{ padding: "6px 0", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 13.5 }}>{r.name}</span>
+                <button onClick={() => toggle(`more-${r.key}`)} style={{ width: 15, height: 15, borderRadius: 99, border: `1px solid ${C.textFaint}`, background: "none", color: C.textFaint, fontSize: 10, lineHeight: "13px", cursor: "pointer", padding: 0 }}>i</button>
+              </div>
+              <span style={{ ...mono, fontSize: 12, color: C.textDim }}>{r.text ?? `${fmt(r.value, r.d ?? 1)} ${r.unit}`}</span>
+            </div>
+            {note && <p style={{ fontSize: 10.5, color: C.textFaint, marginTop: 2 }}>{note}</p>}
+            {open && <p className="fade-up" style={{ fontSize: 11.5, color: C.textDim, marginTop: 6 }}>{r.blurb}</p>}
+          </div>
+        );
+      })}
+
+      {n > 0 && hasAminos && (
+        <>
+          <p style={{ fontSize: 11, color: C.textFaint, textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 4px" }}>Proteinkvalitet — essentiella aminosyror</p>
+          <p style={{ fontSize: 11, color: C.textFaint, marginBottom: 10 }}>Jämfört med behovet för din vikt ({Math.round(weightKg)} kg). Kroppen kan inte tillverka de här själv.</p>
+          {AMINO_ACIDS.map((a) => (
+            <MicroRow
+              key={a.key}
+              def={{ name: a.name, unit: "mg", rdi: a.perKg * weightKg, blurb: a.blurb }}
+              amount={sumKey(a.key)}
+              color={C.ringProtein} colorDim="rgba(255,122,86,0.14)"
+              open={openInfo === `amino-${a.key}`} onToggle={() => toggle(`amino-${a.key}`)}
+            />
+          ))}
+          {cov("leu") && <p style={{ fontSize: 10.5, color: C.textFaint, marginTop: 6 }}>Aminosyror: {cov("leu")}.</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ dailyLog, targets, weightKg = 75 }) {
   const [pageIdx, setPageIdx] = useState(0);
   const [openInfo, setOpenInfo] = useState(null); // single key — only one info text open at a time
   const touchStartX = useRef(0);
@@ -3531,6 +3631,7 @@ function Dashboard({ dailyLog, targets }) {
     { key: "minerals", label: "Mineraler" },
     { key: "bonus", label: "Bra ämnen" },
     { key: "ranking", label: "Hälsoranking" },
+    { key: "more", label: "Fett, salt & protein" },
   ];
 
   function goToPage(i) {
@@ -3647,6 +3748,8 @@ function Dashboard({ dailyLog, targets }) {
               })}
             </div>
           )}
+
+          {pageIdx === 5 && <MorePage dailyLog={dailyLog} weightKg={weightKg} openInfo={openInfo} toggle={toggle} />}
 
           {/* health ranking — how today's food supports different areas of the body */}
           {pageIdx === 4 && (
