@@ -181,7 +181,7 @@ const VITAMINS = [
   { key: "b6", name: "B6", unit: "mg", rdi: 1.4, blurb: "Viktigt för protein-ämnesomsättning och immunförsvar." },
   { key: "b7", name: "B7 (Biotin)", unit: "µg", rdi: 50, blurb: "Stöttar hår, hud och ämnesomsättning." },
   { key: "b9", name: "B9 (Folat)", unit: "µg", rdi: 200, blurb: "Viktigt för celldelning, extra viktigt vid graviditet." },
-  { key: "b12", name: "B12", unit: "µg", rdi: 2.5, blurb: "Behövs för nervsystem och röda blodkroppar." },
+  { key: "b12", name: "B12", unit: "µg", rdi: 2.5, blurb: "Behövs för nervsystem och röda blodkroppar. Mineralet kobolt sitter i B12-molekylen, så får du i dig B12 får du också kobolt." },
   { key: "choline", name: "Kolin", unit: "mg", rdi: 400, blurb: "Viktigt för lever-, muskel- och hjärnfunktion." },
 ];
 const MINERALS = [
@@ -196,14 +196,11 @@ const MINERALS = [
   { key: "manganese", name: "Mangan", unit: "mg", rdi: 2, blurb: "Stöttar benbildning och ämnesomsättning." },
   { key: "iodine", name: "Jod", unit: "µg", rdi: 150, blurb: "Behövs för att bilda sköldkörtelhormoner." },
   { key: "sodium", name: "Natrium", unit: "mg", rdi: 2400, blurb: "Reglerar vätskebalans och nervsignaler, men lätt att få i överflöd." },
-  { key: "chloride", name: "Klorid", unit: "mg", rdi: 2300, blurb: "Hjälper till att reglera vätskebalans och bildar magsyra." },
+  { key: "chloride", name: "Klorid", unit: "mg", rdi: 2300, blurb: "Hjälper till att reglera vätskebalans och bildar magsyra. Räknas ut från natriumet, eftersom nästan all klorid kommer från salt och sällan mäts separat." },
   { key: "chromium", name: "Krom", unit: "µg", rdi: 40, blurb: "Kan stötta insulinets funktion och blodsockerreglering." },
   { key: "molybdenum", name: "Molybden", unit: "µg", rdi: 50, blurb: "Behövs som kofaktor i flera viktiga enzymer." },
   { key: "fluoride", name: "Fluorid", unit: "mg", rdi: 3, blurb: "Stärker tandemaljen och motverkar karies." },
-  { key: "sulfur", name: "Svavel", unit: "mg", rdi: 900, blurb: "Ingår i aminosyror och behövs för protein- och bindvävsuppbyggnad." },
-  { key: "cobalt", name: "Kobolt", unit: "µg", rdi: 5, blurb: "Ingår i B12-molekylen och behövs för nervsystem och blodbildning." },
-  { key: "boron", name: "Bor", unit: "mg", rdi: 1, blurb: "Kan stötta benhälsa och kalciumomsättning. Inget officiellt fastställt RDI, värdet är en uppskattad rimlig nivå." },
-  { key: "nickel", name: "Nickel", unit: "µg", rdi: 35, blurb: "Ultra-trace-mineral, misstänkt roll i vissa enzymfunktioner. Inget officiellt fastställt RDI, värdet är en uppskattad rimlig nivå." },
+  { key: "sulfur", name: "Svavel", unit: "mg", rdi: 900, blurb: "Ingår i aminosyror och behövs för protein- och bindvävsuppbyggnad. Räknas ut från proteinet, eftersom svavlet kommer från proteinets aminosyror." },
 ];
 const MICRO_KEYS = [...VITAMINS, ...MINERALS].map((m) => m.key);
 
@@ -541,6 +538,21 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj, dbHit = nu
       if (!(key in knownPer100) && typeof dbHit.per100[key] === "number") dbPer100[key] = dbHit.per100[key];
     });
   }
+  // egna värden + liknande livsmedel: underkategorier räknas om efter DINA värden (mättat fett kan aldrig bli mer än fettet)
+  const hasOwn = Object.keys(knownPer100).length > 0;
+  if (dbHit && hasOwn && dbHit.per100) {
+    const d = dbHit.per100;
+    const byRatio = (parent, child) => {
+      if (child in knownPer100 || !(parent in knownPer100)) return;
+      if (d[parent] > 0 && typeof d[child] === "number") dbPer100[child] = Math.min(knownPer100[parent], (d[child] * knownPer100[parent]) / d[parent]);
+      else if (knownPer100[parent] === 0) dbPer100[child] = 0;
+    };
+    byRatio("fat_g", "satfat_g"); byRatio("fat_g", "transfat_g"); byRatio("carbs_g", "sugar_g"); byRatio("carbs_g", "fiber_g");
+    if (knownPer100.kcal && d.kcal > 0) {
+      const k = knownPer100.kcal / d.kcal;
+      ["protein_g", "carbs_g", "fat_g"].forEach((key) => { if (!(key in knownPer100) && typeof d[key] === "number") dbPer100[key] = d[key] * k; });
+    }
+  }
   const dbMicros100 = dbHit && dbHit.micros100 && Object.keys(dbHit.micros100).length ? dbHit.micros100 : null;
   const missingKeys = KNOWN_FIELDS.map((f) => f.key).filter((k) => !(k in knownPer100) && !(k in dbPer100));
 
@@ -597,7 +609,7 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj, dbHit = nu
 
   return {
     ...scaled, microAmounts, bonus: parsed?.bonus || [],
-    estimatedKeys: parsed ? missingKeys : [],
+    estimatedKeys: hasOwn && dbHit ? Object.keys(dbPer100) : parsed ? missingKeys : [],
     estimatedGrams: Math.round(estimatedGrams),
     source: dbHit ? dbHit.source : null, matchedName: dbHit ? dbHit.name : null,
     ok: true, microsMissing: !dbMicros100 && !parsed?.micro_amounts,
@@ -743,7 +755,9 @@ export default function DotApp() {
   const [show100, setShow100] = useState(false);
   const [candidates, setCandidates] = useState([]); // databasträffar att välja bland
   const [scanned, setScanned] = useState(null); // produkt från streckkodsskanning
-  const [searchNote, setSearchNote] = useState(""); // t.ex. "visar träffar för kiwi" 
+  const [searchNote, setSearchNote] = useState(""); // t.ex. "visar träffar för kiwi"
+  const [ownValuesPick, setOwnValuesPick] = useState(false); // listan används för att fylla i det du inte angett
+  const [displayQty, setDisplayQty] = useState(null); // t.ex. { amount: 2, unit: "st" } när du skrev "2 kiwi" 
 
   const ACTIVITY_MULT = { stillasittande: 1.2, lätt: 1.375, moderat: 1.55, aktiv: 1.725, "mycket aktiv": 1.9 };
 
@@ -778,7 +792,7 @@ export default function DotApp() {
         const k = l.log_date;
         if (!logsByDay[k]) logsByDay[k] = [];
         logsByDay[k].push({
-          id: l.id, grams: l.grams ?? null,
+          id: l.id, grams: l.grams ?? null, amount: l.amount ?? null, unit: l.unit ?? null,
           name: l.name, kcal: l.kcal, protein_g: l.protein_g, carbs_g: l.carbs_g, sugar_g: l.sugar_g,
           fiber_g: l.fiber_g, fat_g: l.fat_g, satfat_g: l.satfat_g, transfat_g: l.transfat_g,
           microAmounts: l.micro_amounts || {}, bonus: l.bonus || [], estimatedKeys: [],
@@ -886,6 +900,7 @@ export default function DotApp() {
       name: e.name, kcal: e.kcal, protein_g: e.protein_g, carbs_g: e.carbs_g, sugar_g: e.sugar_g,
       fiber_g: e.fiber_g, fat_g: e.fat_g, satfat_g: e.satfat_g, transfat_g: e.transfat_g,
       micro_amounts: e.microAmounts || {}, bonus: e.bonus || [], grams: e.grams ?? null,
+      amount: e.amount ?? null, unit: e.unit ?? null,
     };
   }
   function addLogEntry(entry) {
@@ -915,10 +930,13 @@ export default function DotApp() {
         .catch((e) => { console.error("Kunde inte ta bort:", e.message); setSyncError("Kunde inte ta bort från databasen: " + e.message); });
     }
   }
-  function scaleLogEntry(dayKey, entry, factor, newGrams) {
+  function scaleLogEntry(dayKey, entry, factor, newGrams, newAmount, newUnit) {
     if (!(factor > 0)) return;
     const r1 = (v) => Math.round((Number(v) || 0) * factor * 10) / 10;
-    const scaled = { ...entry, grams: newGrams ?? (entry.grams ? Math.round(entry.grams * factor) : null) };
+    const scaled = {
+      ...entry, grams: newGrams ?? (entry.grams ? Math.round(entry.grams * factor) : null),
+      amount: newAmount ?? entry.amount ?? null, unit: newUnit ?? entry.unit ?? null,
+    };
     KNOWN_FIELDS.forEach(({ key }) => { scaled[key] = r1(entry[key]); });
     scaled.bonus = (entry.bonus || []).map((b) => (typeof b.qty === "number" ? { ...b, qty: b.qty * factor } : b));
     scaled.microAmounts = Object.fromEntries(Object.entries(entry.microAmounts || {}).map(([k, v]) => [k, Math.round((Number(v) || 0) * factor * 1000) / 1000]));
@@ -976,11 +994,15 @@ export default function DotApp() {
         }
         amount = String(Math.round(parsed.amount * pg));
         unit = "g";
+        setDisplayQty({ amount: parsed.amount, unit: "st" });
       } else {
         amount = String(parsed.amount);
         unit = parsed.unit;
       }
       setFoodName(name); setWeight(amount); setWeightUnit(unit);
+      if (parsed.unit !== "st") setDisplayQty(null);
+    } else {
+      setDisplayQty(null);
     }
     if (!name) return;
     if (!amount) {
@@ -991,10 +1013,17 @@ export default function DotApp() {
     // har du fyllt i värden från förpackningen används BARA dem — ingen databasvara blandas in
     const hasOwnValues = KNOWN_FIELDS.some(({ key }) => known100[key] !== undefined && String(known100[key]).trim() !== "");
     if (hasOwnValues) {
-      setCandidates([]); setSearchNote("");
+      // dina värden används alltid — välj ett liknande livsmedel för att fylla i resten (eller hoppa över)
+      setLoading(true); setError(""); setSearchNote("");
+      const similar = await lookupFoodDatabase(name, profileInfo.country);
+      setLoading(false);
+      const list = (similar.results || []).filter((c) => !String(c.id).startsWith("off-") || c.micros100);
+      if (list.length) { setCandidates(list); setOwnValuesPick(true); setMode("pick"); return; }
+      setCandidates([]);
       await finishManual(null, { name, amount, unit });
       return;
     }
+    setOwnValuesPick(false);
 
     setLoading(true); setError(""); setCandidates([]);
     const query = normalizeQuery(name);
@@ -1545,7 +1574,7 @@ export default function DotApp() {
                       <LogRow
                         key={e.id || e.tmpId || i} entry={e}
                         onDelete={() => removeLogEntry(todayKey, e)}
-                        onScale={(factor, newGrams) => scaleLogEntry(todayKey, e, factor, newGrams)}
+                        onScale={(factor, newGrams, newAmount, newUnit) => scaleLogEntry(todayKey, e, factor, newGrams, newAmount, newUnit)}
                       />
                     ))}
                     <p style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>Tryck på en rad för att ändra mängd eller ta bort.</p>
@@ -1704,9 +1733,11 @@ export default function DotApp() {
         {/* pick the right database hit */}
         {mode === "pick" && (
           <div className="fade-up" style={{ maxWidth: 480, margin: "20px auto" }}>
-            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>Vilken menar du?</p>
-            <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16 }}>
-              Träffar för "{foodName}" — värdena är per 100 g. Du loggar {weight} {UNIT_LABELS[weightUnit]}.
+            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>{ownValuesPick ? "Vad liknar din vara mest?" : "Vilken menar du?"}</p>
+            <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16, lineHeight: 1.5 }}>
+              {ownValuesPick
+                ? "Dina egna värden används alltid. Det du inte fyllt i — t.ex. mättat fett, vitaminer och mineraler — hämtas från det du väljer och märks som uppskattat."
+                : `Träffar för "${foodName}" — värdena är per 100 g. Du loggar ${weight} ${UNIT_LABELS[weightUnit]}.`}
             </p>
             {searchNote && <p style={{ fontSize: 12, color: C.estimate, marginTop: -8, marginBottom: 14 }}>{searchNote}</p>}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
@@ -1718,7 +1749,7 @@ export default function DotApp() {
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setMode("manual")} style={ghostBtn}>Tillbaka</button>
               <button onClick={() => finishManual(null)} disabled={loading} style={{ ...ghostBtn, flex: 1 }}>
-                Inget av dessa — fyll i själv
+                {ownValuesPick ? "Hoppa över — använd bara mina värden" : "Inget av dessa — fyll i själv"}
               </button>
             </div>
           </div>
@@ -1823,7 +1854,11 @@ export default function DotApp() {
                   onClick={() => {
                     if (confirmed) return;
                     setConfirmed(true);
-                    addLogEntry({ name: foodName, ...result, grams: result.estimatedGrams ?? null });
+                    addLogEntry({
+                      name: foodName, ...result, grams: result.estimatedGrams ?? null,
+                      amount: displayQty ? displayQty.amount : Number(weight) || null,
+                      unit: displayQty ? displayQty.unit : weightUnit,
+                    });
                   }}
                   disabled={confirmed}
                   style={{ ...primaryBtn, width: "100%", opacity: confirmed ? 0.6 : 1 }}
@@ -2071,7 +2106,24 @@ function sumMicroAmounts(dailyLog, defs) {
     const amounts = entry.microAmounts || {};
     defs.forEach((d) => { totals[d.key] += Number(amounts[d.key]) || 0; });
   });
+  const keys = new Set(defs.map((d) => d.key));
+  const measured = (k) => dailyLog.some((e) => (e.microAmounts || {})[k] !== undefined);
+  // klorid kommer nästan bara från salt (NaCl): klorid ≈ natrium × 1,54
+  if (keys.has("chloride") && !measured("chloride")) {
+    totals.chloride = dailyLog.reduce((s, e) => s + (Number((e.microAmounts || {}).sodium) || 0) * 1.54, 0);
+  }
+  // svavel kommer från proteinets aminosyror: ca 10 mg per gram protein
+  if (keys.has("sulfur") && !measured("sulfur")) {
+    totals.sulfur = dailyLog.reduce((s, e) => s + (Number(e.protein_g) || 0) * 10, 0);
+  }
   return totals;
+}
+
+// finns det något att visa för det här ämnet? (uppmätt, eller uträknat från natrium/protein)
+function microHasData(log, key) {
+  if (key === "chloride") return log.some((e) => { const m = e.microAmounts || {}; return m.chloride !== undefined || m.sodium !== undefined; });
+  if (key === "sulfur") return log.some((e) => Number(e.protein_g) > 0 || (e.microAmounts || {}).sulfur !== undefined);
+  return log.some((e) => (e.microAmounts || {})[key] !== undefined);
 }
 
 // "bra ämnen" som finns uppmätta i databaserna — visas när dagens mängd är värd att nämna
@@ -2604,7 +2656,9 @@ function HistoryPage({ dayFoodLogs, weekLog, units = { weight: "kg", height: "cm
   const vitaminTotals = sumMicroAmounts(entries, VITAMINS);
   const mineralTotals = sumMicroAmounts(entries, MINERALS);
   const avgPct = (defs, tot) => {
-    const pcts = defs.map((d) => Math.min(((tot[d.key] || 0) / d.rdi) * 100, 100));
+    const withData = defs.filter((d) => microHasData(entries, d.key));
+    if (!withData.length) return 0;
+    const pcts = withData.map((d) => Math.min(((tot[d.key] || 0) / d.rdi) * 100, 100));
     return Math.round(pcts.reduce((s, p) => s + p, 0) / pcts.length);
   };
 
@@ -3032,7 +3086,9 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
   const vitaminTotals = sumMicroAmounts(dayLog, VITAMINS);
   const mineralTotals = sumMicroAmounts(dayLog, MINERALS);
   const avgPct = (defs, totals) => {
-    const pcts = defs.map((d) => Math.min(((totals[d.key] || 0) / d.rdi) * 100, 100));
+    const withData = defs.filter((d) => microHasData(dayLog, d.key));
+    if (!withData.length) return 0;
+    const pcts = withData.map((d) => Math.min(((totals[d.key] || 0) / d.rdi) * 100, 100));
     return Math.round(pcts.reduce((s, p) => s + p, 0) / pcts.length);
   };
   const hasFood = dayLog.length > 0;
@@ -3323,24 +3379,45 @@ function BarcodeScanner({ onCode, onCancel, loading }) {
   );
 }
 
+// gram per enhet när en loggad rad ändras (vätskor räknas som 1 g per ml)
+const UNIT_TO_GRAMS = { g: 1, ml: 1, dl: 100, msk: 15, tsk: 5, kopp: 240 };
+function gramsFor(amount, unit, name) {
+  if (unit === "st") { const pg = pieceGrams((name || "").toLowerCase()); return pg ? amount * pg : null; }
+  return UNIT_TO_GRAMS[unit] ? amount * UNIT_TO_GRAMS[unit] : null;
+}
+function formatLogQty(entry) {
+  if (entry.amount && entry.unit && entry.unit !== "g") {
+    const n = Math.round(entry.amount * 10) / 10;
+    return `${n.toLocaleString("sv-SE")} ${UNIT_LABELS[entry.unit] || entry.unit}`;
+  }
+  return Number(entry.grams) > 0 ? `${Math.round(entry.grams)} g` : null;
+}
+
 function LogRow({ entry, onDelete, onScale }) {
   const [open, setOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const hasGrams = Number(entry.grams) > 0;
-  const [value, setValue] = useState(hasGrams ? String(entry.grams) : "1");
+  const startUnit = entry.unit && entry.amount ? entry.unit : "g";
+  const startValue = entry.unit && entry.amount ? String(entry.amount) : hasGrams ? String(Math.round(entry.grams)) : "1";
+  const [unit, setUnit] = useState(startUnit);
+  const [value, setValue] = useState(startValue);
+  const [msg, setMsg] = useState("");
+  const qty = formatLogQty(entry);
 
   function save() {
     const v = Number(String(value).replace(",", "."));
     if (!(v > 0)) return;
-    if (hasGrams) onScale(v / Number(entry.grams), Math.round(v));
-    else onScale(v, null);
+    if (!hasGrams) { onScale(v, null); setOpen(false); return; } // äldre logg utan vikt: antal portioner
+    const g = gramsFor(v, unit, entry.name);
+    if (!g) { setMsg(`Vet inte vad en "${entry.name}" väger — välj gram i stället.`); return; }
+    onScale(g / Number(entry.grams), Math.round(g), v, unit);
     setOpen(false);
   }
 
   return (
     <div style={{ ...glass, borderRadius: 14, overflow: "hidden" }}>
       <button
-        onClick={() => { setOpen((o) => !o); setConfirmDel(false); setValue(hasGrams ? String(entry.grams) : "1"); }}
+        onClick={() => { setOpen((o) => !o); setConfirmDel(false); setMsg(""); setUnit(startUnit); setValue(startValue); }}
         style={{
           width: "100%", background: "none", border: "none", cursor: "pointer", color: C.text,
           padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left",
@@ -3348,14 +3425,14 @@ function LogRow({ entry, onDelete, onScale }) {
       >
         <span style={{ fontSize: 13.5 }}>
           {entry.name || "Måltid"}
-          {hasGrams && <span style={{ color: C.textFaint, fontSize: 11.5 }}> · {Math.round(entry.grams)} g</span>}
+          {qty && <span style={{ color: C.textFaint, fontSize: 11.5 }}> · {qty}</span>}
         </span>
         <span style={{ ...mono, fontSize: 12.5, color: C.accent }}>{Math.round(entry.kcal || 0)} kcal</span>
       </button>
       {open && (
         <div className="fade-up" style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: C.textDim, flex: 1 }}>{hasGrams ? "Mängd (gram)" : "Antal portioner"}</span>
+            <span style={{ fontSize: 12, color: C.textDim, flex: 1 }}>{hasGrams ? "Mängd" : "Antal portioner"}</span>
             <input
               value={value} inputMode="decimal"
               onChange={(ev) => setValue(ev.target.value.replace(/[^0-9.,]/g, ""))}
@@ -3364,6 +3441,24 @@ function LogRow({ entry, onDelete, onScale }) {
             />
             <button onClick={save} style={{ ...primaryBtn, padding: "8px 14px", fontSize: 12.5 }}>Spara</button>
           </div>
+          {hasGrams && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {UNITS.map((u) => (
+                <button
+                  key={u.v} onClick={() => { setUnit(u.v); setMsg(""); }}
+                  style={{
+                    fontSize: 11, padding: "5px 9px", borderRadius: 7, cursor: "pointer",
+                    border: unit === u.v ? "1px solid transparent" : "1px solid rgba(255,255,255,0.08)",
+                    background: unit === u.v ? C.accent : "rgba(255,255,255,0.05)",
+                    color: unit === u.v ? "#08150E" : C.textDim, fontWeight: unit === u.v ? 600 : 400,
+                  }}
+                >
+                  {u.l}
+                </button>
+              ))}
+            </div>
+          )}
+          {msg && <p style={{ fontSize: 11.5, color: C.estimate }}>{msg}</p>}
           {!confirmDel ? (
             <button onClick={() => setConfirmDel(true)} style={{ ...ghostBtn, color: "#E08F8F", padding: "8px 12px" }}>
               <Trash2 size={13} /> Ta bort
@@ -3476,7 +3571,7 @@ function Dashboard({ dailyLog, targets }) {
           {pageIdx === 1 && (
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
               <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.vitamin }}>Vitaminer idag</p>
-              {VITAMINS.map((v) => (
+              {VITAMINS.filter((v) => dailyLog.length === 0 || microHasData(dailyLog, v.key)).map((v) => (
                 <MicroRow
                   key={v.key} def={v} amount={vitaminTotals[v.key] || 0}
                   noData={dailyLog.length > 0 && !dailyLog.some((e) => (e.microAmounts || {})[v.key] !== undefined)}
@@ -3484,6 +3579,11 @@ function Dashboard({ dailyLog, targets }) {
                   open={openInfo === v.key} onToggle={() => toggle(v.key)}
                 />
               ))}
+              {dailyLog.length > 0 && VITAMINS.some((d) => !microHasData(dailyLog, d.key)) && (
+                <p style={{ fontSize: 11, color: C.textFaint, marginTop: 10 }}>
+                  {VITAMINS.filter((d) => !microHasData(dailyLog, d.key)).map((d) => d.name).join(", ")} visas inte — de finns inte uppmätta för det du ätit idag.
+                </p>
+              )}
             </div>
           )}
 
@@ -3491,7 +3591,7 @@ function Dashboard({ dailyLog, targets }) {
           {pageIdx === 2 && (
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
               <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.mineral }}>Mineraler idag</p>
-              {MINERALS.map((m) => (
+              {MINERALS.filter((m) => dailyLog.length === 0 || microHasData(dailyLog, m.key)).map((m) => (
                 <MicroRow
                   key={m.key} def={m} amount={mineralTotals[m.key] || 0}
                   noData={dailyLog.length > 0 && !dailyLog.some((e) => (e.microAmounts || {})[m.key] !== undefined)}
@@ -3499,6 +3599,11 @@ function Dashboard({ dailyLog, targets }) {
                   open={openInfo === m.key} onToggle={() => toggle(m.key)}
                 />
               ))}
+              {dailyLog.length > 0 && MINERALS.some((d) => !microHasData(dailyLog, d.key)) && (
+                <p style={{ fontSize: 11, color: C.textFaint, marginTop: 10 }}>
+                  {MINERALS.filter((d) => !microHasData(dailyLog, d.key)).map((d) => d.name).join(", ")} visas inte — de finns inte uppmätta för det du ätit idag.
+                </p>
+              )}
             </div>
           )}
 
