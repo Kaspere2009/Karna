@@ -756,6 +756,12 @@ export default function DotApp() {
   const [candidates, setCandidates] = useState([]); // databasträffar att välja bland
   const [scanned, setScanned] = useState(null); // produkt från streckkodsskanning
   const [searchNote, setSearchNote] = useState(""); // t.ex. "visar träffar för kiwi"
+  const [justLogged, setJustLogged] = useState(""); // kort bekräftelse på hemskärmen
+  useEffect(() => {
+    if (!justLogged) return;
+    const t = setTimeout(() => setJustLogged(""), 2500);
+    return () => clearTimeout(t);
+  }, [justLogged]);
   const [ownValuesPick, setOwnValuesPick] = useState(false); // listan används för att fylla i det du inte angett
   const [displayQty, setDisplayQty] = useState(null); // t.ex. { amount: 2, unit: "st" } när du skrev "2 kiwi" 
 
@@ -947,6 +953,28 @@ export default function DotApp() {
     }
   }
 
+  // det du loggat senast (olika livsmedel, nyast först) — ett tryck loggar samma sak igen
+  const recentFoods = (() => {
+    const seen = new Set();
+    const out = [];
+    for (const d of Object.keys(dayFoodLogs).sort().reverse().slice(0, 21)) {
+      for (const e of [...(dayFoodLogs[d] || [])].reverse()) {
+        const k = (e.name || "").trim().toLowerCase();
+        if (!k || seen.has(k)) continue;
+        seen.add(k);
+        out.push(e);
+        if (out.length >= 8) return out;
+      }
+    }
+    return out;
+  })();
+  function relog(e) {
+    const { id, tmpId, ...rest } = e;
+    addLogEntry(rest);
+    setJustLogged(e.name || "Måltid");
+    reset();
+  }
+
   function reset() {
     setMode("idle"); setFoodName(""); setWeight(""); setWeightUnit("g"); setPhotoDesc("");
     setPhotoData(null); setResult(null); setConfirmed(false);
@@ -989,6 +1017,7 @@ export default function DotApp() {
         const pg = pieceGrams(parsed.name);
         if (!pg) {
           setFoodName(name); setWeight(""); setWeightUnit("g");
+          setMode("manual");
           setError(`Jag vet inte hur mycket en "${name}" väger ungefär — skriv mängden i gram i fältet här nedanför.`);
           return;
         }
@@ -1006,7 +1035,9 @@ export default function DotApp() {
     }
     if (!name) return;
     if (!amount) {
-      setError('Skriv hur mycket, t.ex. "150 g ris" eller "2 kiwi" — eller fyll i mängden här nedanför.');
+      setFoodName(name);
+      setMode("manual");
+      setError('Hur mycket? Fyll i mängden här nedanför — eller skriv den direkt, t.ex. "150 g ris" eller "2 kiwi".');
       return;
     }
 
@@ -1524,6 +1555,11 @@ export default function DotApp() {
           const dateStr = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
           return (
             <div className="fade-up" style={{ paddingBottom: 90 }}>
+              {justLogged && (
+                <div className="fade-up" style={{ ...glass, borderRadius: 12, padding: "10px 14px", marginBottom: 16, fontSize: 12.5, color: C.accent, display: "flex", alignItems: "center", gap: 8 }}>
+                  <Check size={14} /> Loggat: {justLogged}
+                </div>
+              )}
               <div style={{ marginBottom: 22 }}>
                 <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 2 }}>{greeting}</p>
                 <p style={{ fontSize: 12, color: C.textFaint, textTransform: "capitalize" }}>{dateStr}</p>
@@ -1585,29 +1621,53 @@ export default function DotApp() {
           );
         })()}
 
-        {/* choose method */}
+        {/* log screen: search, scan, recent foods */}
         {mode === "choose" && (
-          <div className="fade-up" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14, maxWidth: 520, margin: "40px auto" }}>
-            {[
-              { key: "manual", icon: Keyboard, title: "Manuellt", sub: "Skriv livsmedel + vikt" },
-              { key: "photo", icon: Camera, title: "Bild", sub: "Fota din måltid" },
-              { key: "scan", icon: BarcodeIcon, title: "Skanna", sub: "Streckkod på förpackningen" },
-            ].map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => setMode(opt.key)}
-                style={{
-                  background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
-                  padding: "24px 16px", cursor: "pointer", textAlign: "left", color: C.text,
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = C.accent)}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = C.border)}
-              >
-                <opt.icon size={20} color={C.accent} style={{ marginBottom: 12 }} />
-                <div style={{ ...display, fontSize: 15, fontWeight: 600, marginBottom: 3 }}>{opt.title}</div>
-                <div style={{ fontSize: 12.5, color: C.textDim }}>{opt.sub}</div>
+          <div className="fade-up" style={{ maxWidth: 480, margin: "10px auto" }}>
+            <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 14 }}>Logga</p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input
+                autoFocus value={foodName}
+                onChange={(e) => setFoodName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && foodName.trim() && !loading && estimateManual()}
+                placeholder='t.ex. "150 g ris" eller "2 kiwi"'
+                style={{ ...onbInput, flex: 1 }}
+              />
+              <button onClick={estimateManual} disabled={!foodName.trim() || loading} style={{ ...primaryBtn, opacity: foodName.trim() ? 1 : 0.5 }}>
+                {loading ? "Söker…" : "Sök"}
               </button>
-            ))}
+            </div>
+            <button onClick={() => { setError(""); setMode("scan"); }} style={{ ...ghostBtn, width: "100%", marginBottom: 20 }}>
+              <BarcodeIcon size={16} /> Skanna streckkod
+            </button>
+            {error && <p style={{ fontSize: 12, color: C.estimate, marginTop: -8, marginBottom: 14 }}>{error}</p>}
+
+            {recentFoods.length > 0 && (
+              <>
+                <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>Senaste</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+                  {recentFoods.map((e, i) => (
+                    <div key={i} style={{ ...glass, borderRadius: 14, padding: "10px 12px 10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5 }}>{e.name || "Måltid"}</div>
+                        <div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>
+                          {[formatLogQty(e), `${Math.round(e.kcal || 0)} kcal`].filter(Boolean).join(" · ")}
+                        </div>
+                      </div>
+                      <button onClick={() => relog(e)} style={{ ...primaryBtn, padding: "8px 14px", fontSize: 12.5 }}>
+                        <Plus size={14} /> Logga
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setError(""); setMode("photo"); }} style={{ ...ghostBtn, flex: 1 }}><Camera size={14} /> Foto</button>
+              <button onClick={() => { setError(""); setShow100(true); setMode("manual"); }} style={{ ...ghostBtn, flex: 1 }}>Egna värden</button>
+              <button onClick={reset} style={ghostBtn}>Stäng</button>
+            </div>
           </div>
         )}
 
