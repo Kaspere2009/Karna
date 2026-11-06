@@ -282,33 +282,109 @@ const FONT_IMPORT = `
 ::selection { background: ${C.accentDim}; color: ${C.accent}; }
 `;
 
-// ---------- mock "USDA-shaped" lookup, used only if the API call fails ----------
-const FALLBACK = {
-  protein_g: 1.1, carbs_g: 22.8, sugar_g: 12.2, fiber_g: 2.6,
-  fat_g: 0.3, satfat_g: 0.1, transfat_g: 0, kcal: 96,
-  microAmounts: { potassium: 240, b6: 0.3 },
-  bonus: [],
-};
+// ---------- AI ----------
+// Princip: AI:n hittar ALDRIG på näringsvärden. Den tolkar bara text/bilder (vad och hur mycket)
+// och väljer rätt rad i databasen. Alla siffror räknas fram från databasen i appen.
+// Modellen bestäms i api/claude.js. Utan AI-nyckel misslyckas anropen tyst och appen fungerar som vanligt.
+let aiAccessToken = null; // sätts när man loggar in — servern släpper bara igenom inloggade
 
-async function callClaude(messages, system) {
+async function callClaude(messages, system, maxTokens = 600) {
   const res = await fetch("/api/claude", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      system,
-      messages,
-    }),
+    headers: {
+      "Content-Type": "application/json",
+      ...(aiAccessToken ? { Authorization: `Bearer ${aiAccessToken}` } : {}),
+    },
+    body: JSON.stringify({ max_tokens: maxTokens, system, messages }),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((typeof data.error === "string" ? data.error : data.error?.message) || "AI:n svarade inte.");
   const textBlock = (data.content || []).find((b) => b.type === "text");
   return textBlock ? textBlock.text : "";
 }
 
 function parseJsonLoose(text) {
-  const clean = text.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean);
+  const clean = String(text || "").replace(/```json|```/g, "").trim();
+  const start = clean.search(/[[{]/);
+  const end = Math.max(clean.lastIndexOf("}"), clean.lastIndexOf("]"));
+  return JSON.parse(start >= 0 && end > start ? clean.slice(start, end + 1) : clean);
+}
+
+// gäller träffen okokt/torr vikt? (ris, pasta, gryn, baljväxter…)
+const DRY_FOOD_RE = /(^|[^a-zåäö])(ris|rice|pasta|spaghetti|makaron|macaroni|nudl|noodle|bulgur|couscous|quinoa|matvete|korngryn|pärlgryn|linser|lentil|kikärt|chickpea|bönor|beans)/i;
+const DRY_STATE_RE = /(okokt|torr|torkad|uncooked|\braw\b|\bdry\b|dried)/i;
+function isUncookedWeight(name) {
+  const n = String(name || "");
+  return DRY_FOOD_RE.test(n) && DRY_STATE_RE.test(n);
+}
+
+// fri text → { name, amount, unit } (t.ex. "en tallrik spagetti bolognese", "ett glas mjölk")
+async function aiInterpret(text) {
+  try {
+    const system =
+      "Du tolkar vad en användare har ätit, för en matloggningsapp. Svara ENDAST med JSON, ingen annan text: " +
+      '{"name": string, "amount": number, "unit": "g"|"ml"|"dl"|"msk"|"tsk"|"kopp"|"st", "alternatives": [string]} ' +
+      "name: ett enkelt sökord för livsmedlet på svenska, som det kan heta i en livsmedelsdatabas (t.ex. \"mjölk\", \"spaghetti kokt\", \"kycklingfilé\"). " +
+      "amount/unit: mängden användaren angav. Saknas mängd, gissa en vanlig portion i gram (unit \"g\"). Ett glas ≈ 2 dl. " +
+      "alternatives: 0–3 andra sökord (t.ex. engelska namnet eller ett bredare ord). Hitta aldrig på näringsvärden.";
+    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: text }], system, 200));
+    const unit = UNIT_MAP[parsed.unit] || "g";
+    const amount = Number(parsed.amount);
+    if (!parsed.name || !(amount > 0)) return null;
+    return { name: String(parsed.name).trim(), amount, unit, alternatives: (parsed.alternatives || []).map(String).filter(Boolean).slice(0, 3) };
+  } catch (e) {
+    return null;
+  }
+}
+
+// väljer den databasrad som bäst passar det användaren skrev — returnerar raden, eller null om osäker
+async function aiPickCandidate(query, candidates) {
+  if (!candidates || candidates.length < 2) return candidates?.[0] || null;
+  try {
+    const list = candidates.slice(0, 12).map((c, i) => `${i}: ${c.name} (${Math.round(c.per100.kcal)} kcal/100 g)`).join("\n");
+    const system =
+      "Du väljer vilken rad i en livsmedelsdatabas som bäst motsvarar det användaren åt. Svara ENDAST med JSON: " +
+      '{"index": number} där index är radens nummer, eller -1 om ingen rad passar. ' +
+      "Regler: om användaren inte skrivit okokt/torr/rå, välj tillagad variant (kokt ris, kokt pasta, stekt/kokt kött) framför okokt eller rå. " +
+      "Välj den vanligaste, mest neutrala varianten om inget annat anges. Märkesvaror bara om användaren nämnt märket.";
+    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `Användaren skrev: "${query}"\n\nRader:\n${list}` }], system, 50));
+    const i = Number(parsed.index);
+    return Number.isInteger(i) && i >= 0 && i < candidates.length ? candidates[i] : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// hur många gram motsvarar t.ex. "1 dl havregryn"? (bara mängden — inga näringsvärden)
+async function aiEstimateGrams(name, amount, unit) {
+  try {
+    const system =
+      'Svara ENDAST med JSON: {"grams": number}. Uppskatta hur många gram den angivna mängden av livsmedlet väger. ' +
+      "Ta hänsyn till densitet (1 dl havregryn ≈ 35 g, 1 dl mjölk ≈ 103 g, 1 msk olja ≈ 14 g). 1 kopp = 2,4 dl.";
+    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `${amount} ${UNIT_LABELS[unit] || unit} ${name}` }], system, 50));
+    const g = Number(parsed.grams);
+    return g > 0 ? g : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// bild → lista med livsmedel och gram. Värdena hämtas sedan från databasen.
+async function aiPhotoItems(photoData, description) {
+  const system =
+    "Du ser en bild av en måltid. Lista de livsmedel som syns och uppskatta vikten i gram för varje del. Svara ENDAST med JSON: " +
+    '{"items": [{"name": string, "grams": number}]} ' +
+    "name: enkelt sökord på svenska som det kan heta i en livsmedelsdatabas, med tillagningssätt om det syns (t.ex. \"ris kokt\", \"kycklingfilé stekt\", \"broccoli kokt\"). " +
+    "Högst 8 delar. Ta med såser och dressing om de syns. Hitta aldrig på näringsvärden.";
+  const content = [
+    { type: "image", source: { type: "base64", media_type: photoData.mime, data: photoData.b64 } },
+    { type: "text", text: description ? `Användarens beskrivning: ${description}` : "Ingen beskrivning." },
+  ];
+  const parsed = parseJsonLoose(await callClaude([{ role: "user", content }], system, 500));
+  return (parsed.items || [])
+    .map((it) => ({ name: String(it.name || "").trim(), grams: Math.round(Number(it.grams) || 0) }))
+    .filter((it) => it.name && it.grams > 0)
+    .slice(0, 8);
 }
 
 // ---------- field row ----------
@@ -554,65 +630,40 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj, dbHit = nu
     }
   }
   const dbMicros100 = dbHit && dbHit.micros100 && Object.keys(dbHit.micros100).length ? dbHit.micros100 : null;
-  const missingKeys = KNOWN_FIELDS.map((f) => f.key).filter((k) => !(k in knownPer100) && !(k in dbPer100));
 
-  // AI behövs bara för det databasen inte kan svara på: gram för andra enheter, saknade fält, saknade vitaminer
-  const needsAi = !isGrams || missingKeys.length > 0 || !dbMicros100;
-  let parsed = null;
-  if (needsAi) {
-    try {
-      const system =
-        "Du är en näringsdatabas-assistent. Du får ett livsmedel/dryck, en mängd (ev. i annan enhet än gram) och ev. värden användaren redan känner till (per 100g/100ml). " +
-        "Svara ENDAST med ett JSON-objekt (ingen text, inga markdown-fences) i exakt detta format: " +
-        '{"estimated_grams": number, "per100": {"kcal": number, "protein_g": number, "carbs_g": number, "sugar_g": number, ' +
-        '"fiber_g": number, "fat_g": number, "satfat_g": number, "transfat_g": number}, ' +
-        `"micro_amounts": {${MICRO_KEYS.map((k) => `"${k}": number`).join(", ")}}, ` +
-        '"bonus": [{"name": string, "amount": string, "reason": string}]} ' +
-        "estimated_grams: din bästa uppskattning av hur många gram den angivna mängden motsvarar (för vätskor kan du anta ca 1g per ml; 1 dl = 100ml, 1 msk = 15ml, 1 tsk = 5ml, 1 kopp ≈ 240ml, för 'st' uppskatta en rimlig genomsnittlig vikt för det livsmedlet). " +
-        "Fyll endast i uppskattade värden (typ USDA FoodData Central, per 100g/100ml) för dessa fält i \"per100\", resten ignoreras ändå: " + JSON.stringify(missingKeys) + ". " +
-        "micro_amounts: uppskatta den faktiska mängden (i den enhet listan anger, µg eller mg) av VARJE nämnt ämne för hela portionen (redan skalat till estimated_grams), sätt 0 om livsmedlet inte innehåller nämnvärt av det — hoppa inte över några nycklar. " +
-        "bonus: 0-2 icke-essentiella men nyttiga ämnen om relevant (t.ex. omega-3, polyfenoler, antioxidanter), amount som kort textsträng (t.ex. \"620mg\"), reason en kort mening (max ~12 ord) om varför ämnet är bra för hälsan. Lämna tomt om inget relevant.";
-      const text = await callClaude(
-        [{ role: "user", content:
-          `Livsmedel/dryck: ${dbHit ? dbHit.name : name}\nAngiven mängd: ${amountStr} ${UNIT_LABELS[unit] || unit}\n` +
-          `Kända värden per 100g/100ml: ${JSON.stringify({ ...dbPer100, ...knownPer100 })}\n` +
-          `Nyckel → ämne (enhet): ${[...VITAMINS, ...MINERALS].map((m) => `${m.key}=${m.name}(${m.unit})`).join(", ")}` }],
-        system
-      );
-      parsed = parseJsonLoose(text);
-    } catch (e) {
-      parsed = null; // AI inte tillgänglig — vi använder bara riktiga värden
-    }
-  }
-
+  // inga riktiga värden alls (varken databas eller dina egna) → hittades inte. AI fyller ALDRIG i näringsvärden.
   const hasRealValues = Object.keys(knownPer100).length > 0 || Object.keys(dbPer100).length > 0;
-  if (!hasRealValues && !parsed) return { notFound: true };
+  if (!hasRealValues) return { notFound: true };
 
-  const estimatedGrams = isGrams
-    ? Number(amountStr)
-    : (parsed?.estimated_grams || Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100));
+  // gram för andra enheter än gram: AI uppskattar bara MÄNGDEN (t.ex. 1 dl havregryn ≈ 35 g), annars en tabell
+  let estimatedGrams = Number(amountStr);
+  if (!isGrams) {
+    const fromTable = unit === "st"
+      ? (pieceGrams(String(dbHit ? dbHit.name : name).toLowerCase()) || pieceGrams(String(name).toLowerCase()) || 100) * Number(amountStr)
+      : Number(amountStr) * (FALLBACK_UNIT_GRAMS[unit] || 100);
+    estimatedGrams = (await aiEstimateGrams(dbHit ? dbHit.name : name, amountStr, unit)) || fromTable;
+  }
   const factor = estimatedGrams / 100;
 
-  const combinedPer100 = { ...(parsed?.per100 || {}), ...dbPer100, ...knownPer100 };
+  const combinedPer100 = { ...dbPer100, ...knownPer100 };
   const scaled = {};
   KNOWN_FIELDS.forEach(({ key }) => {
     const v = combinedPer100[key];
     scaled[key] = typeof v === "number" && v > 0 ? Math.round(v * factor * 10) / 10 : 0;
   });
 
-  let microAmounts = {};
+  const microAmounts = {};
   if (dbMicros100) {
     Object.entries(dbMicros100).forEach(([k, v]) => { microAmounts[k] = Math.round(v * factor * 1000) / 1000; });
-  } else if (parsed?.micro_amounts) {
-    microAmounts = parsed.micro_amounts;
   }
 
   return {
-    ...scaled, microAmounts, bonus: parsed?.bonus || [],
-    estimatedKeys: hasOwn && dbHit ? Object.keys(dbPer100) : parsed ? missingKeys : [],
+    ...scaled, microAmounts, bonus: [],
+    estimatedKeys: hasOwn && dbHit ? Object.keys(dbPer100) : [],
     estimatedGrams: Math.round(estimatedGrams),
     source: dbHit ? dbHit.source : null, matchedName: dbHit ? dbHit.name : null,
-    ok: true, microsMissing: !dbMicros100 && !parsed?.micro_amounts,
+    uncooked: isUncookedWeight(dbHit ? dbHit.name : ""),
+    ok: true, microsMissing: !dbMicros100,
   };
 }
 
@@ -763,6 +814,9 @@ export default function DotApp() {
     return () => clearTimeout(t);
   }, [justLogged]);
   const [ownValuesPick, setOwnValuesPick] = useState(false); // listan används för att fylla i det du inte angett
+  const [photoItems, setPhotoItems] = useState([]); // livsmedel som AI såg på bilden, med värden från databasen
+  const [photoMissing, setPhotoMissing] = useState([]);
+  useEffect(() => { aiAccessToken = session?.access_token || null; }, [session]);
   const [displayQty, setDisplayQty] = useState(null); // t.ex. { amount: 2, unit: "st" } när du skrev "2 kiwi" 
 
   const ACTIVITY_MULT = { stillasittande: 1.2, lätt: 1.375, moderat: 1.55, aktiv: 1.725, "mycket aktiv": 1.9 };
@@ -980,6 +1034,7 @@ export default function DotApp() {
     setPhotoData(null); setResult(null); setConfirmed(false);
     setChatOpen(false); setChatMsgs([]); setError("");
     setKnown100({}); setShow100(false); setCandidates([]); setScanned(null);
+    setPhotoItems([]); setPhotoMissing([]); setSearchNote("");
   }
 
   async function handleScanned(code) {
@@ -1007,14 +1062,29 @@ export default function DotApp() {
       return;
     }
     setScanned(null);
-    let name = foodName.trim();
+    const original = foodName.trim();
+    let name = original;
     let amount = weight.trim();
     let unit = weightUnit;
-    const parsed = parseFoodInput(name);
+    let altQueries = [];
+    let parsed = parseFoodInput(name);
+    // ingen mängd i texten (t.ex. "ett glas mjölk", "en tallrik spagetti") → låt AI tolka texten
+    if (!parsed && !amount && name) {
+      setLoading(true); setError("");
+      const ai = await aiInterpret(name);
+      setLoading(false);
+      if (ai) { parsed = ai; altQueries = ai.alternatives || []; }
+    }
     if (parsed) {
       name = parsed.name;
       if (parsed.unit === "st") {
-        const pg = pieceGrams(parsed.name);
+        let pg = pieceGrams(parsed.name);
+        if (!pg) {
+          setLoading(true);
+          const g = await aiEstimateGrams(parsed.name, 1, "st");
+          setLoading(false);
+          if (g) pg = g;
+        }
         if (!pg) {
           setFoodName(name); setWeight(""); setWeightUnit("g");
           setMode("manual");
@@ -1027,9 +1097,9 @@ export default function DotApp() {
       } else {
         amount = String(parsed.amount);
         unit = parsed.unit;
+        setDisplayQty(null);
       }
       setFoodName(name); setWeight(amount); setWeightUnit(unit);
-      if (parsed.unit !== "st") setDisplayQty(null);
     } else {
       setDisplayQty(null);
     }
@@ -1079,12 +1149,30 @@ export default function DotApp() {
         }
       }
     }
-    setLoading(false);
+    // fortfarande inget → be AI om andra sökord (t.ex. rättstavat eller på engelska)
+    if (merged.length === 0) {
+      if (!altQueries.length) {
+        const ai = await aiInterpret(`${amount} ${UNIT_LABELS[unit] || unit} ${name}`);
+        altQueries = ai ? [ai.name, ...(ai.alternatives || [])] : [];
+      }
+      for (const q of [...new Set(altQueries)].filter((q) => q && q.toLowerCase() !== name.toLowerCase())) {
+        const alt = await lookupFoodDatabase(q, profileInfo.country);
+        if ((alt.results || []).length) {
+          merged = alt.results;
+          setSearchNote(`Inga träffar för "${name}" — visar träffar för "${q}".`);
+          break;
+        }
+      }
+    }
     setCandidates(merged);
     const ctx = { name, amount, unit };
-    if (merged.length === 0) { await finishManual(null, ctx); return; }
-    // har du valt något för exakt den här sökningen förut → använd det direkt (du kan byta träff efteråt)
-    if (remembered.length > 0) { await finishManual(merged[0], ctx); return; }
+    if (merged.length === 0) { setLoading(false); await finishManual(null, ctx); return; }
+    // minnet först: har du valt något för exakt den här sökningen förut → använd det direkt (du kan byta träff efteråt)
+    if (remembered.length > 0) { setLoading(false); await finishManual(merged[0], ctx); return; }
+    // annars väljer AI den rad som passar bäst. Osäker AI (eller ingen AI) → du väljer själv.
+    const pick = await aiPickCandidate(original, merged);
+    setLoading(false);
+    if (pick) { await finishManual(pick, ctx); return; }
     setMode("pick");
   }
 
@@ -1104,39 +1192,59 @@ export default function DotApp() {
     if (hit) saveChoice(session, normalizeQuery(name), hit);
     setResult(res);
     setMode("result");
-    if (res.microsMissing) setError("Vitaminer och mineraler finns inte för den här träffen (och AI är inte aktiverad än), så de räknas inte med.");
+    if (res.microsMissing) setError("Vitaminer och mineraler finns inte uppmätta för den här träffen, så de räknas inte med.");
   }
 
+  // "Byt träff": visa alla träffar igen — söker på nytt om listan inte finns kvar
+  async function switchHit() {
+    setConfirmed(false); setError("");
+    if (candidates.length > 1) { setMode("pick"); return; }
+    setLoading(true);
+    const lookup = await lookupFoodDatabase(foodName, profileInfo.country);
+    setLoading(false);
+    const list = lookup.results || [];
+    if (list.length) { setCandidates(list); setOwnValuesPick(false); setMode("pick"); }
+    else setError(`Hittade inga andra träffar för "${foodName}". Prova att söka med ett annat ord.`);
+  }
+
+  // foto: AI ser VAD som ligger på tallriken och ungefär hur mycket — värdena hämtas från databasen
   async function estimatePhoto() {
     if (!photoData) return;
     setLoading(true); setError("");
+    let items;
     try {
-      const system =
-        "Du är en näringsdatabas-assistent som tolkar bilder av måltider. " +
-        "Svara ENDAST med ett JSON-objekt (ingen text, inga markdown-fences) i exakt detta format: " +
-        '{"kcal": number, "protein_g": number, "carbs_g": number, "sugar_g": number, ' +
-        '"fiber_g": number, "fat_g": number, "satfat_g": number, "transfat_g": number, ' +
-        `"micro_amounts": {${MICRO_KEYS.map((k) => `"${k}": number`).join(", ")}}, ` +
-        '"bonus": [{"name": string, "amount": string}]} ' +
-        "micro_amounts: uppskatta faktisk mängd (µg/mg enligt nyckellistan nedan) av VARJE ämne för hela portionen, sätt 0 om inte nämnvärt — hoppa inte över nycklar. " +
-        "bonus: 0-2 icke-essentiella nyttiga ämnen om relevant, amount som kort textsträng. " +
-        "Uppskatta portionsstorlek utifrån bilden och ev. beskrivning.\n" +
-        `Nyckel → ämne (enhet): ${[...VITAMINS, ...MINERALS].map((m) => `${m.key}=${m.name}(${m.unit})`).join(", ")}`;
-      const content = [
-        { type: "image", source: { type: "base64", media_type: photoData.mime, data: photoData.b64 } },
-        { type: "text", text: photoDesc.trim() ? `Beskrivning från användaren: ${photoDesc}` : "Ingen extra beskrivning given." },
-      ];
-      const text = await callClaude([{ role: "user", content }], system);
-      const parsed = parseJsonLoose(text);
-      const allKeys = KNOWN_FIELDS.map((f) => f.key);
-      setResult({ ...parsed, microAmounts: parsed.micro_amounts || {}, bonus: parsed.bonus || [], estimatedKeys: allKeys });
-      setFoodName(photoDesc.trim() || "Foto-loggad måltid");
-      setMode("result");
+      items = await aiPhotoItems(photoData, photoDesc.trim());
     } catch (e) {
-      setError("Bildloggning kräver AI, som inte är aktiverad än. Logga manuellt så länge.");
-    } finally {
       setLoading(false);
+      setError(/inte aktiverad/i.test(e.message) ? "Bildloggning kräver AI, som inte är aktiverad än. Logga manuellt så länge." : "Kunde inte tolka bilden: " + e.message);
+      return;
     }
+    if (!items.length) { setLoading(false); setError("Hittade ingen mat på bilden. Prova en annan bild eller lägg till en beskrivning."); return; }
+    const found = [];
+    const missing = [];
+    for (const it of items) {
+      const [lookup, remembered] = await Promise.all([lookupFoodDatabase(it.name, profileInfo.country), loadChoices(session, normalizeQuery(it.name))]);
+      const merged = mergeCandidates(remembered, lookup.results);
+      if (!merged.length) { missing.push(it.name); continue; }
+      const hit = remembered.length ? merged[0] : (await aiPickCandidate(it.name, merged)) || merged[0];
+      const res = await estimateFoodValues(it.name, String(it.grams), "g", {}, hit);
+      if (res.notFound) { missing.push(it.name); continue; }
+      found.push({ key: `${it.name}-${found.length}`, name: it.name, grams: it.grams, res });
+    }
+    setLoading(false);
+    if (!found.length) { setError(`Hittade inte ${missing.join(", ")} i databasen. Logga manuellt i stället.`); return; }
+    setPhotoItems(found);
+    setPhotoMissing(missing);
+    setConfirmed(false);
+    setMode("photo-result");
+  }
+
+  function logPhotoItems() {
+    if (confirmed) return;
+    setConfirmed(true);
+    photoItems.forEach((it) => addLogEntry({ name: it.name, ...it.res, grams: it.res.estimatedGrams, amount: it.grams, unit: "g" }));
+    setJustLogged(photoItems.map((it) => it.name).join(", "));
+    reset();
   }
 
   function handleFile(e) {
@@ -1159,14 +1267,16 @@ export default function DotApp() {
     setChatLoading(true);
     try {
       const system =
-        `Du är en kort, konkret näringscoach inne i en loggnings-vy. Användaren loggar just nu ` +
-        `"${foodName}" (${weight || "okänd"} g) med dessa värden: ${JSON.stringify(result)}. ` +
-        `Svara kort (max 3 meningar) på svenska.`;
+        `Du är en kort, konkret hjälpreda inne i en matloggningsapp. Användaren loggar just nu ` +
+        `"${foodName}" (${weight || "okänd"} ${UNIT_LABELS[weightUnit] || "g"}) med dessa värden från livsmedelsdatabasen: ` +
+        `${JSON.stringify({ kcal: result.kcal, protein_g: result.protein_g, carbs_g: result.carbs_g, fat_g: result.fat_g, fiber_g: result.fiber_g, gram: result.estimatedGrams, källa: result.source, träff: result.matchedName })}. ` +
+        `Svara kort (max 3 meningar) på svenska. Hitta aldrig på egna näringsvärden — utgå från siffrorna ovan. ` +
+        `Neutral ton: informera, moralisera inte. Håll dig till bred forskningskonsensus.`;
       const apiMsgs = nextMsgs.map((m) => ({ role: m.role, content: m.text }));
       const text = await callClaude(apiMsgs, system);
       setChatMsgs((m) => [...m, { role: "assistant", text: text || "Kunde inte svara just nu." }]);
-    } catch {
-      setChatMsgs((m) => [...m, { role: "assistant", text: "Kunde inte nå AI:n just nu." }]);
+    } catch (e) {
+      setChatMsgs((m) => [...m, { role: "assistant", text: /inte aktiverad/i.test(e.message) ? "AI är inte aktiverad än." : "Kunde inte nå AI:n just nu." }]);
     } finally {
       setChatLoading(false);
     }
@@ -1736,8 +1846,8 @@ export default function DotApp() {
             </button>
             <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: show100 ? 12 : 22 }}>
               {show100
-                ? "Precis som på förpackningen — DOT räknar om till din faktiska vikt. Lämna resten tomt så uppskattar AI:n det."
-                : "Vet du t.ex. protein- eller fettinnehållet per 100g (från förpackningen)? Fyll i det du vet, rekommenderat för bästa resultat — annars uppskattar AI:n allt."}
+                ? "Precis som på förpackningen — DOT räknar om till din faktiska vikt. Lämna resten tomt, så fylls det i från ett liknande livsmedel du väljer."
+                : "Vet du t.ex. protein- eller fettinnehållet per 100g (från förpackningen)? Fyll i det du vet — resten hämtas från ett liknande livsmedel."}
             </p>
 
             {show100 && (
@@ -1858,7 +1968,51 @@ export default function DotApp() {
                 onClick={estimatePhoto} disabled={!photoData || loading}
                 style={{ ...primaryBtn, opacity: !photoData ? 0.5 : 1 }}
               >
-                {loading ? "Analyserar bild…" : "Logga"}
+                {loading ? "Analyserar bild…" : "Analysera bild"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* photo result: det AI såg på bilden, med värden från databasen */}
+        {mode === "photo-result" && (
+          <div className="fade-up" style={{ maxWidth: 480, margin: "20px auto" }}>
+            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>Det här såg jag på bilden</p>
+            <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16, lineHeight: 1.5 }}>
+              Vikterna är uppskattade från bilden. Värdena kommer från livsmedelsdatabasen. Ta bort det som inte stämmer — mängderna kan du ändra efter loggningen genom att trycka på raden.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+              {photoItems.map((it) => (
+                <div key={it.key} style={{ ...glass, borderRadius: 14, padding: "10px 12px 10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5 }}>{it.name} <span style={{ color: C.textFaint, fontSize: 11.5 }}>· ca {it.grams} g</span></div>
+                    <div style={{ fontSize: 10.5, color: C.textFaint, marginTop: 2 }}>
+                      Träff: {it.res.matchedName}
+                      {it.res.uncooked && <span style={{ color: C.estimate }}> · okokt vikt</span>}
+                    </div>
+                  </div>
+                  <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(it.res.kcal)} kcal</span>
+                  <button onClick={() => setPhotoItems((list) => list.filter((x) => x.key !== it.key))} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                    <X size={14} color={C.textFaint} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {photoMissing.length > 0 && (
+              <p style={{ fontSize: 11.5, color: C.estimate, marginBottom: 12 }}>
+                Hittades inte i databasen och räknas inte med: {photoMissing.join(", ")}. Logga dem gärna separat.
+              </p>
+            )}
+            <div style={{ ...glass, borderRadius: 14, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, color: C.textDim }}>Totalt</span>
+              <span style={{ ...mono, fontSize: 13, fontWeight: 600 }}>
+                {Math.round(photoItems.reduce((s, it) => s + (it.res.kcal || 0), 0))} kcal · {Math.round(photoItems.reduce((s, it) => s + (it.res.protein_g || 0), 0))}g protein
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { setMode("photo"); setError(""); }} style={ghostBtn}>Tillbaka</button>
+              <button onClick={logPhotoItems} disabled={confirmed || photoItems.length === 0} style={{ ...primaryBtn, flex: 1, opacity: photoItems.length ? 1 : 0.5 }}>
+                <Check size={15} /> Logga allt
               </button>
             </div>
           </div>
@@ -1877,12 +2031,12 @@ export default function DotApp() {
                       Källa: {result.source}{result.matchedName ? ` · Träff: "${result.matchedName}"` : ""}
                     </div>
                   )}
-                  {candidates.length > 1 && (
+                  {(result.matchedName || candidates.length > 1) && (
                     <button
-                      onClick={() => { setMode("pick"); setConfirmed(false); setError(""); }}
+                      onClick={switchHit} disabled={loading}
                       style={{ background: "none", border: "none", color: C.accent, fontSize: 11.5, cursor: "pointer", padding: 0, marginTop: 6, textDecoration: "underline" }}
                     >
-                      Byt träff
+                      {loading ? "Söker…" : "Byt träff"}
                     </button>
                   )}
                 </div>
@@ -1893,6 +2047,11 @@ export default function DotApp() {
 
               {error && (
                 <p style={{ fontSize: 12, color: C.estimate, marginTop: 8, marginBottom: 4 }}>{error}</p>
+              )}
+              {result.uncooked && (
+                <div className="fade-up" style={{ background: C.estimateDim, border: `1px solid ${C.estimate}55`, borderRadius: 10, padding: "9px 12px", marginTop: 10, fontSize: 12, color: C.estimate, lineHeight: 1.5 }}>
+                  Obs: värdena gäller <b>okokt (torr) vikt</b>. Vägde du maten kokt blir det för mycket — tryck <b>Byt träff</b> och välj en kokt variant.
+                </div>
               )}
 
               <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "6px 16px", marginTop: 18, marginBottom: 10 }}>
@@ -2871,7 +3030,7 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
     }
     if (hit) saveChoice(session, normalizeQuery(ingName), hit);
     setIngredients((list) => [...list, { name: ingName, weight: ingWeight, unit: ingUnit, ...res }]);
-    if (res.microsMissing) setIngError("Ingrediensen är tillagd, men vitaminer och mineraler saknas för den (AI är inte aktiverad än).");
+    if (res.microsMissing) setIngError("Ingrediensen är tillagd, men vitaminer och mineraler finns inte uppmätta för den.");
     setIngName(""); setIngWeight(""); setIngUnit("g"); setIngKnown100({}); setIngShow100(false);
     setIngLoading(false);
     setAdding(false);
@@ -3552,6 +3711,7 @@ function CandidateButton({ c, onPick, disabled }) {
         <div style={{ fontSize: 10.5, color: C.textFaint }}>
           {src ? `${src} · ` : ""}P {Math.round(c.per100.protein_g)}g · K {Math.round(c.per100.carbs_g)}g · F {Math.round(c.per100.fat_g)}g
           {c.remembered ? <span style={{ color: C.estimate }}> · ditt val</span> : null}
+          {isUncookedWeight(c.name) ? <span style={{ color: C.estimate }}> · okokt vikt</span> : null}
         </div>
       </div>
       <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(c.per100.kcal)} kcal</span>
