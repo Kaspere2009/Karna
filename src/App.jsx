@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   Terminal, Camera, Keyboard, Loader2, Send, Sparkles,
   Check, X, ChevronRight, ChevronLeft, Flame, Dot, ChevronDown, Mail, LayoutGrid, TrendingUp, Home,
-  CalendarDays, BookOpen, Plus, Trash2, Settings, User, Crown, Ruler, Bell, ShieldCheck, HelpCircle, Info, LogOut
+  CalendarDays, BookOpen, Plus, Trash2, Settings, User, Ruler, ShieldCheck, HelpCircle, Info, LogOut
 } from "lucide-react";
 
 // fields the user can optionally fill in per 100g, matching a package label
@@ -2646,10 +2646,9 @@ function Toggle({ on, onChange }) {
 }
 
 function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, onDeleteAccount, units, setUnits }) {
-  const [view, setView] = useState("menu"); // menu | profile | units | notifications | subscription | privacy | help | about
+  const [view, setView] = useState("menu"); // menu | profile | units | privacy | help | about
   const [saved, setSaved] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [notifs, setNotifs] = useState({ reminder: true, streak: true, weekly: false });
 
   function handleSave() {
     onSave();
@@ -2735,67 +2734,23 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
     );
   }
 
-  // ---------- notifications ----------
-  if (view === "notifications") {
-    const rows = [
-      { key: "reminder", label: "Påminnelse att logga", sub: "En knuff om du inte loggat något sent på dagen" },
-      { key: "streak", label: "Streak-varningar", sub: "Påminnelse innan din streak bryts" },
-      { key: "weekly", label: "Veckosammanfattning", sub: "Notis när en ny veckosammanfattning är redo" },
-    ];
-    return (
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Notiser" onBack={() => setView("menu")} />
-        <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 14, padding: "4px 18px" }}>
-          {rows.map((r) => (
-            <div key={r.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 0", borderBottom: `1px solid ${C.border}` }}>
-              <div style={{ flex: 1, paddingRight: 12 }}>
-                <div style={{ fontSize: 13.5 }}>{r.label}</div>
-                <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 1 }}>{r.sub}</div>
-              </div>
-              <Toggle on={notifs[r.key]} onChange={(v) => setNotifs((n) => ({ ...n, [r.key]: v }))} />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ---------- subscription ----------
-  if (view === "subscription") {
-    return (
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Prenumeration" onBack={() => setView("menu")} />
-        <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 16 }}>
-          <p style={{ ...display, fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Gratis provperiod</p>
-          <p style={{ fontSize: 12.5, color: C.textDim, marginBottom: 14 }}>Dag 1 av 7 — full tillgång till alla funktioner.</p>
-          <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
-            <div style={{ width: "14%", height: "100%", background: "linear-gradient(90deg, #F2C063, #8FD9A8)" }} />
-          </div>
-        </div>
-        <button style={{ ...primaryBtn, width: "100%" }}>Uppgradera till Premium</button>
-        <p style={{ fontSize: 11, color: C.textFaint, marginTop: 12, textAlign: "center" }}>
-          Ingen betalning krävs under provperioden. Avsluta när som helst.
-        </p>
-      </div>
-    );
-  }
-
   // ---------- privacy ----------
   if (view === "privacy") {
     return (
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
         <SettingsSubHeader title="Dataskydd & export" onBack={() => setView("menu")} />
         <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
+          <p style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6, marginBottom: 10 }}>
+            Din data (loggar, vikt, måltider och progressbilder) sparas på ditt konto och säljs eller delas aldrig för reklam.
+          </p>
+          <p style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6, marginBottom: 10 }}>
+            När du loggar med fri text eller foto skickas texten eller bilden till vår AI-leverantör (Anthropic) för att tolkas — vad du åt och ungefär hur mycket. Näringsvärdena kommer alltid från livsmedelsdatabaserna, aldrig från AI:n.
+          </p>
           <p style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6 }}>
-            All din data (loggar, vikt, bilder) sparas på ditt konto och delas aldrig med tredje part utan ditt samtycke.
+            Du kan när som helst radera ditt konto under Inställningar — då raderas all din data permanent.
           </p>
         </div>
-        <button style={{ ...ghostBtn, width: "100%", marginBottom: 10, justifyContent: "flex-start", padding: "13px 16px" }}>
-          Exportera min data
-        </button>
-        <button style={{ ...ghostBtn, width: "100%", justifyContent: "flex-start", padding: "13px 16px" }}>
-          Läs integritetspolicyn
-        </button>
+        <p style={{ fontSize: 11, color: C.textFaint, textAlign: "center" }}>Fullständig integritetspolicy publiceras inom kort.</p>
       </div>
     );
   }
@@ -2845,11 +2800,9 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
 
       <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>Konto</p>
       <SettingsRow icon={User} label="Profil" sub="Ålder, vikt, mål och aktivitetsnivå" onClick={() => setView("profile")} />
-      <SettingsRow icon={Crown} label="Prenumeration" sub="Dag 1 av 7 — gratis provperiod" onClick={() => setView("subscription")} />
 
       <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Preferenser</p>
       <SettingsRow icon={Ruler} label="Enheter" sub={`${units.weight} · ${units.height}`} onClick={() => setView("units")} />
-      <SettingsRow icon={Bell} label="Notiser" onClick={() => setView("notifications")} />
 
       <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Data & support</p>
       <SettingsRow icon={ShieldCheck} label="Dataskydd & export" onClick={() => setView("privacy")} />
