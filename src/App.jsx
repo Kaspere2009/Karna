@@ -696,6 +696,7 @@ async function estimateFoodValues(name, amountStr, unit, known100Obj, dbHit = nu
 export default function DotApp() {
   const [page, setPage] = useState("login"); // login | email-login | auth | profile | log | dashboard
   const [authInfo, setAuthInfo] = useState({ email: "", password: "" });
+  const [consent, setConsent] = useState(false); // samtycke till hälsouppgifter vid registrering
   const [session, setSession] = useState(null); // { access_token, refresh_token, expires_at, user: { id, email } }
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -1363,6 +1364,10 @@ export default function DotApp() {
                 <button onClick={startGoogleLogin} style={socialBtn}>
                   <GoogleIcon /> Fortsätt med Google
                 </button>
+                <p style={{ fontSize: 10.5, color: C.textFaint, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+                  Är du ny godkänner du att DOT sparar dina kost- och hälsouppgifter enligt{" "}
+                  <a href="/integritet.html" target="_blank" rel="noopener noreferrer" style={{ color: C.accent }}>integritetspolicyn</a> (16 år eller äldre).
+                </p>
                 <button disabled style={{ ...socialBtn, marginTop: 10, opacity: 0.45, cursor: "default" }}>
                   <AppleIcon /> Apple — kommer snart
                 </button>
@@ -1428,11 +1433,19 @@ export default function DotApp() {
                   type="password" value={authInfo.password} onChange={(e) => setAuthInfo((a) => ({ ...a, password: e.target.value }))}
                   placeholder="•••••••• (minst 6 tecken)" style={{ ...onbInput, marginBottom: 12 }}
                 />
-                {authError && <p style={{ fontSize: 11.5, color: "#E08F8F", marginBottom: 12 }}>{authError}</p>}
+                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: C.textDim, lineHeight: 1.5, cursor: "pointer", marginTop: 4 }}>
+                  <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)}
+                    style={{ marginTop: 3, accentColor: C.accent, width: 16, height: 16, flexShrink: 0 }} />
+                  <span>
+                    Jag är minst 16 år och godkänner att DOT sparar mina kost- och hälsouppgifter enligt{" "}
+                    <a href="/integritet.html" target="_blank" rel="noopener noreferrer" style={{ color: C.accent }}>integritetspolicyn</a>.
+                  </span>
+                </label>
+                {authError && <p style={{ fontSize: 11.5, color: "#E08F8F", marginTop: 12, marginBottom: 0 }}>{authError}</p>}
                 <button
                   onClick={handleSignup}
-                  disabled={!authInfo.email.trim() || !authInfo.password.trim() || authLoading}
-                  style={{ ...primaryBtn, width: "100%", opacity: !authInfo.email.trim() || !authInfo.password.trim() ? 0.5 : 1, marginTop: 16 }}
+                  disabled={!authInfo.email.trim() || !authInfo.password.trim() || !consent || authLoading}
+                  style={{ ...primaryBtn, width: "100%", opacity: !authInfo.email.trim() || !authInfo.password.trim() || !consent ? 0.5 : 1, marginTop: 16 }}
                 >
                   {authLoading ? "Skapar konto…" : <>Skapa konto <ChevronRight size={15} /></>}
                 </button>
@@ -2750,7 +2763,10 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
             Du kan när som helst radera ditt konto under Inställningar — då raderas all din data permanent.
           </p>
         </div>
-        <p style={{ fontSize: 11, color: C.textFaint, textAlign: "center" }}>Fullständig integritetspolicy publiceras inom kort.</p>
+        <a href="/integritet.html" target="_blank" rel="noopener noreferrer"
+          style={{ ...ghostBtn, width: "100%", justifyContent: "flex-start", padding: "13px 16px", textDecoration: "none", boxSizing: "border-box" }}>
+          Läs hela integritetspolicyn
+        </a>
       </div>
     );
   }
