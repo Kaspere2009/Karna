@@ -1100,8 +1100,9 @@ export default function DotApp() {
       const ai = await aiInterpret(name);
       setLoading(false);
       if (ai) { parsed = ai; altQueries = ai.alternatives || []; }
-      else if (vague) parsed = vague;
-      if (parsed && amount) parsed = { ...parsed, amount: Number(amount.replace(",", ".")) || parsed.amount, unit };
+      // säger texten själv hur mycket ("ett glas") gäller det — annars din siffra i Mängd, om du fyllt i en
+      if (vague) parsed = { ...(parsed || {}), ...vague, name: parsed?.name || vague.name };
+      else if (parsed && amount) parsed = { ...parsed, amount: Number(amount.replace(",", ".")) || parsed.amount, unit };
     }
     if (parsed) {
       name = parsed.name;
