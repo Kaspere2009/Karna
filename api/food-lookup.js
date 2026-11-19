@@ -1,278 +1,184 @@
-// Fyller tabellen "foods" i Supabase med data från Livsmedelsverket och USDA.
-// Öppna https://<din-sida>/api/import-foods i webbläsaren, skriv in ditt IMPORT_SECRET och tryck på knapparna.
-// Kräver miljövariablerna SUPABASE_SECRET_KEY, IMPORT_SECRET och USDA_API_KEY i Vercel.
-
-export const config = { maxDuration: 60 };
+// api/food-lookup.js — söker livsmedel åt appen.
+//  POST { query, country }  → { results: [...] }   (egen databas först, sedan märkesvaror från Open Food Facts)
+//  POST { barcode }         → { product: {...} }   (streckkod via Open Food Facts)
+// Alla värden är per 100 g, direkt från källan. Inget uppskattas här.
 
 const SUPABASE_URL = "https://clwdczzwsvowsfpaijjm.supabase.co";
-const SLV_API = "https://dataportal.livsmedelsverket.se/livsmedel/api/v1";
-const SLV_BATCH = 40;     // livsmedel per anrop (varje livsmedel kräver ett eget näringsvärdes-anrop)
-const USDA_PAGE = 200;    // livsmedel per anrop
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DJZHyFLJcCW3Ii4HlXgjOw_rbEZkh4s";
+const OFF_HEADERS = { "User-Agent": "DOT/1.0 (karna-pied.vercel.app)", Accept: "application/json" };
+const DB_LIMIT = 30;   // hämtas från databasen, sorteras om, visas högst 15
+const SHOW_LIMIT = 15;
+const OFF_LIMIT = 5;
+
+const SOURCE_LABELS = { slv: "Livsmedelsverkets livsmedelsdatabas", usda: "USDA FoodData Central" };
+// landskod → Open Food Facts landnamn (för märkesvaror från ditt land)
+const OFF_COUNTRIES = {
+  SE: "sweden", NO: "norway", DK: "denmark", FI: "finland", DE: "germany", GB: "united-kingdom",
+  US: "united-states", ES: "spain", FR: "france", IT: "italy", NL: "netherlands", PL: "poland",
+};
 
 // ---------- hjälpfunktioner ----------
-const round = (n, d = 3) => Math.round(n * 10 ** d) / 10 ** d;
-const TO_MG = { g: 1000, mg: 1, "µg": 0.001, ug: 0.001, mcg: 0.001 };
-
-function convertMass(value, fromUnit, toUnit) {
-  const f = TO_MG[String(fromUnit || "").toLowerCase()];
-  if (f === undefined || typeof value !== "number") return null;
-  const mg = value * f;
-  return toUnit === "µg" ? mg * 1000 : toUnit === "g" ? mg / 1000 : mg;
-}
-
-async function getJson(url, tries = 3) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (res.ok) return await res.json();
-      if (res.status === 404) return null;
-    } catch (e) { /* försök igen */ }
-    await new Promise((r) => setTimeout(r, 500 * (i + 1)));
-  }
-  throw new Error("Kunde inte hämta " + url.split("?")[0]);
-}
-
-async function mapLimit(items, limit, fn) {
-  const out = new Array(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await fn(items[i], i);
-    }
-  }));
-  return out;
-}
-
-async function upsertFoods(rows) {
-  const key = process.env.SUPABASE_SECRET_KEY;
-  for (let i = 0; i < rows.length; i += 200) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/foods`, {
-      method: "POST",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify(rows.slice(i, i + 200)),
-    });
-    if (!res.ok) throw new Error("Supabase svarade " + res.status + ": " + (await res.text()));
+async function fetchWithTimeout(url, options = {}, ms = 4000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
   }
 }
 
-// ---------- Livsmedelsverket ----------
-// förkortning → [appens fält, appens enhet]
-const SLV_MACROS = { PROT: "protein_g", CHO: "carbs_g", SUGAR: "sugar_g", FIBT: "fiber_g", FAT: "fat_g", FASAT: "satfat_g", FATRN: "transfat_g" };
-const SLV_MICROS = {
-  VITA: ["vit_a", "µg"], VITD: ["vit_d", "µg"], VITE: ["vit_e", "mg"], VITK: ["vit_k", "µg"], VITC: ["vit_c", "mg"],
-  THIACLHCL: ["b1", "mg"], THIA: ["b1", "mg"], RIBF: ["b2", "mg"], NIA: ["b3", "mg"], VITB6: ["b6", "mg"],
-  FOL: ["b9", "µg"], VITB12: ["b12", "µg"],
-  CA: ["calcium", "mg"], FE: ["iron", "mg"], MG: ["magnesium", "mg"], K: ["potassium", "mg"], P: ["phosphorus", "mg"],
-  ZN: ["zinc", "mg"], SE: ["selenium", "µg"], ID: ["iodine", "µg"], NA: ["sodium", "mg"],
-  // "bra ämnen"
-  "F20:5": ["epa", "mg"], "F22:6": ["dha", "mg"], "F22:5": ["dpa", "mg"], "F18:3": ["ala", "mg"],
-  CARTBTOT: ["beta_carotene", "µg"], CARTB: ["beta_carotene", "µg"], WHOLET: ["wholegrain", "g"],
-  // fler värden
-  "F18:2": ["la", "mg"], "F20:4": ["aa", "mg"], CHORL: ["cholesterol", "mg"], FAMS: ["mufa", "g"], FAPU: ["pufa", "g"],
-  SUGAD: ["added_sugar", "g"], ALC: ["alcohol", "g"], WATER: ["water", "g"],
-};
+const num = (v) => (typeof v === "number" && isFinite(v) ? v : Number(v) || 0);
+const norm = (s) => String(s || "").toLowerCase().normalize("NFC").trim();
 
-// slår ihop fettsyrorna till omega-3 (ALA + EPA + DHA) och EPA + DHA
-function finishBonus(micros) {
-  const { epa, dha, dpa, ala, la, aa } = micros;
-  if (epa !== undefined || dha !== undefined || ala !== undefined || dpa !== undefined) {
-    micros.omega3 = round((epa || 0) + (dha || 0) + (dpa || 0) + (ala || 0));
-    micros.epa_dha = round((epa || 0) + (dha || 0));
-  }
-  if (la !== undefined || aa !== undefined) micros.omega6 = round((la || 0) + (aa || 0));
-  delete micros.epa; delete micros.dha; delete micros.dpa; delete micros.ala; delete micros.la; delete micros.aa;
-  return micros;
-}
-
-function slvRow(nummer, nameSv, nameEn, naringsvarden) {
-  const row = {
-    id: `slv-${nummer}`, source: "slv", country: "SE",
-    name_sv: nameSv || null, name_en: nameEn || null,
-    search_text: [nameSv, nameEn].filter(Boolean).join(" | ").toLowerCase(),
-    kcal: 0, protein_g: 0, carbs_g: 0, sugar_g: 0, fiber_g: 0, fat_g: 0, satfat_g: 0, transfat_g: 0,
-    micros: {}, updated_at: new Date().toISOString(),
+function rowToCandidate(r) {
+  const extra = r.extra_micros && Object.keys(r.extra_micros).length ? r.extra_micros : null;
+  const micros = { ...(extra || {}), ...(r.micros || {}) };
+  return {
+    id: r.id,
+    source: (SOURCE_LABELS[r.source] || r.source) + (extra ? ", kompletterat med USDA FoodData Central" : ""),
+    name: r.name_sv || r.name_en,
+    per100: {
+      kcal: num(r.kcal), protein_g: num(r.protein_g), carbs_g: num(r.carbs_g), sugar_g: num(r.sugar_g),
+      fiber_g: num(r.fiber_g), fat_g: num(r.fat_g), satfat_g: num(r.satfat_g), transfat_g: num(r.transfat_g),
+    },
+    micros100: Object.keys(micros).length ? micros : null,
   };
-  for (const n of naringsvarden || []) {
-    if (typeof n.varde !== "number") continue;
-    const code = n.forkortning;
-    const unit = String(n.enhet || "").split("/").pop(); // "RE/µg" → "µg"
-    if (code === "ENERC" && String(n.enhet).toLowerCase() === "kcal") row.kcal = n.varde;
-    else if (SLV_MACROS[code]) row[SLV_MACROS[code]] = Math.max(0, n.varde);
-    else if (SLV_MICROS[code]) {
-      const [key, appUnit] = SLV_MICROS[code];
-      const v = convertMass(n.varde, unit, appUnit);
-      if (v !== null && v >= 0 && row.micros[key] === undefined) row.micros[key] = round(v);
-    }
-  }
-  finishBonus(row.micros);
-  return row;
 }
 
-async function importSlv(offset) {
-  const [sv, en] = await Promise.all([
-    getJson(`${SLV_API}/livsmedel?offset=${offset}&limit=${SLV_BATCH}&sprak=1`),
-    getJson(`${SLV_API}/livsmedel?offset=${offset}&limit=${SLV_BATCH}&sprak=2`),
-  ]);
-  const foods = (sv && sv.livsmedel) || [];
-  const total = sv && sv._meta ? sv._meta.totalRecords : 0;
-  const enNames = Object.fromEntries(((en && en.livsmedel) || []).map((f) => [f.nummer, f.namn]));
-
-  const rows = await mapLimit(foods, 8, async (f) => {
-    const nv = await getJson(`${SLV_API}/livsmedel/${f.nummer}/naringsvarden?sprak=2`);
-    return slvRow(f.nummer, (f.namn || "").trim(), (enNames[f.nummer] || "").trim(), nv);
-  });
-  if (rows.length) await upsertFoods(rows);
-
-  const nextCursor = offset + foods.length;
-  return { imported: rows.length, nextCursor, total, done: foods.length === 0 || nextCursor >= total };
+// vanliga livsmedel först: "mjölk" ska ge "Mjölk fett 3%" före "Mjölkchoklad"
+function rankScore(name, query) {
+  const n = norm(name);
+  const q = norm(query);
+  if (!q) return 3;
+  const words = n.split(/[\s,.;:()/|-]+/).filter(Boolean);
+  if (n === q) return 0;
+  if (words[0] === q || n.startsWith(q + " ") || n.startsWith(q + ",")) return 1;
+  if (words.includes(q)) return 2;
+  return 3;
+}
+function rerank(list, query) {
+  return list
+    .map((c, i) => ({ c, i, s: rankScore(c.name, query) }))
+    .sort((a, b) => a.s - b.s || a.i - b.i)
+    .map((x) => x.c);
 }
 
-// ---------- USDA (SR Legacy, ca 7 800 vanliga livsmedel) ----------
-// nutrientnummer → appens fält/nyckel och enhet
-const USDA_MACROS = { "203": "protein_g", "205": "carbs_g", "269": "sugar_g", "291": "fiber_g", "204": "fat_g", "606": "satfat_g", "605": "transfat_g" };
-const USDA_MICROS = {
-  "320": ["vit_a", "µg"], "328": ["vit_d", "µg"], "323": ["vit_e", "mg"], "430": ["vit_k", "µg"], "401": ["vit_c", "mg"],
-  "404": ["b1", "mg"], "405": ["b2", "mg"], "406": ["b3", "mg"], "410": ["b5", "mg"], "415": ["b6", "mg"],
-  "435": ["b9", "µg"], "418": ["b12", "µg"], "421": ["choline", "mg"],
-  "301": ["calcium", "mg"], "303": ["iron", "mg"], "304": ["magnesium", "mg"], "305": ["phosphorus", "mg"],
-  "306": ["potassium", "mg"], "307": ["sodium", "mg"], "309": ["zinc", "mg"], "312": ["copper", "mg"],
-  "315": ["manganese", "mg"], "317": ["selenium", "µg"], "313": ["fluoride", "mg"],
-  // "bra ämnen"
-  "629": ["epa", "mg"], "621": ["dha", "mg"], "631": ["dpa", "mg"], "851": ["ala", "mg"], "619": ["ala", "mg"],
-  "321": ["beta_carotene", "µg"], "337": ["lycopene", "µg"], "338": ["lutein", "µg"],
-  // fler värden
-  "618": ["la", "mg"], "855": ["aa", "mg"], "601": ["cholesterol", "mg"], "645": ["mufa", "g"], "646": ["pufa", "g"],
-  "262": ["caffeine", "mg"], "263": ["theobromine", "mg"], "221": ["alcohol", "g"], "255": ["water", "g"],
-  // essentiella aminosyror
-  "501": ["trp", "mg"], "502": ["thr", "mg"], "503": ["ile", "mg"], "504": ["leu", "mg"], "505": ["lys", "mg"],
-  "506": ["met", "mg"], "508": ["phe", "mg"], "510": ["val", "mg"], "512": ["his", "mg"],
-};
-
-function usdaRow(food) {
-  const name = (food.description || "").trim();
-  const row = {
-    id: `usda-${food.fdcId}`, source: "usda", country: null,
-    name_sv: null, name_en: name, search_text: name.toLowerCase(),
-    kcal: 0, protein_g: 0, carbs_g: 0, sugar_g: 0, fiber_g: 0, fat_g: 0, satfat_g: 0, transfat_g: 0,
-    micros: {}, updated_at: new Date().toISOString(),
-  };
-  for (const n of food.foodNutrients || []) {
-    const num = String(n.number ?? n.nutrientNumber ?? (n.nutrient && n.nutrient.number) ?? "");
-    const value = n.amount ?? n.value;
-    const unit = String(n.unitName ?? (n.nutrient && n.nutrient.unitName) ?? "");
-    if (typeof value !== "number") continue;
-    if (num === "208" && unit.toUpperCase() === "KCAL") row.kcal = value;
-    else if (USDA_MACROS[num]) row[USDA_MACROS[num]] = Math.max(0, value);
-    else if (USDA_MICROS[num]) {
-      const [key, appUnit] = USDA_MICROS[num];
-      const v = convertMass(value, unit, appUnit);
-      if (v !== null && v >= 0 && (row.micros[key] === undefined || num !== "619")) row.micros[key] = round(v);
-    }
-  }
-  finishBonus(row.micros);
-  return row;
-}
-
-// USDA:s lista skickar en förkortad version utan fettsyror/karotenoider — de hämtas separat, 20 livsmedel per anrop
-const USDA_BONUS_NUMBERS = [ // max 25 per anrop
-  629, 621, 631, 851, 321, 337, 338,
-  618, 855, 601, 645, 646, 262, 263, 221, 255,
-  501, 502, 503, 504, 505, 506, 508, 510, 512,
-];
-
-async function fetchUsdaBonus(ids, key) {
-  const res = await fetch(`https://api.nal.usda.gov/fdc/v1/foods?api_key=${key}`, {
+// ---------- egen databas (Supabase) ----------
+async function searchDatabase(query, country) {
+  const key = process.env.SUPABASE_SECRET_KEY || SUPABASE_PUBLISHABLE_KEY;
+  const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/search_foods`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fdcIds: ids, format: "abridged", nutrients: USDA_BONUS_NUMBERS }),
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ q: query, p_country: country || null, p_limit: DB_LIMIT }),
+  }, 6000);
+  if (!res.ok) {
+    console.error("[food-lookup] search_foods svarade", res.status, (await res.text()).slice(0, 300));
+    return [];
+  }
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.id && (r.name_sv || r.name_en)).map(rowToCandidate);
+}
+
+// ---------- Open Food Facts (märkesvaror) ----------
+const OFF_MICROS = [
+  // [OFF-fält (gram per 100 g), appens nyckel, faktor till appens enhet]
+  ["sodium_100g", "sodium", 1000], ["calcium_100g", "calcium", 1000], ["iron_100g", "iron", 1000],
+  ["potassium_100g", "potassium", 1000], ["magnesium_100g", "magnesium", 1000], ["zinc_100g", "zinc", 1000],
+  ["vitamin-c_100g", "vit_c", 1000], ["vitamin-d_100g", "vit_d", 1e6], ["vitamin-a_100g", "vit_a", 1e6],
+  ["vitamin-b12_100g", "b12", 1e6], ["iodine_100g", "iodine", 1e6],
+];
+function offToCandidate(p) {
+  const n = p && p.nutriments;
+  if (!n) return null;
+  const kcal = n["energy-kcal_100g"] ?? (n["energy_100g"] ? n["energy_100g"] / 4.184 : undefined);
+  if (typeof kcal !== "number" && isNaN(Number(kcal))) return null;
+  const name = String(p.product_name_sv || p.product_name || p.generic_name || "").trim();
+  if (!name) return null;
+  const micros = {};
+  for (const [field, key, factor] of OFF_MICROS) {
+    const v = Number(n[field]);
+    if (n[field] !== undefined && n[field] !== "" && isFinite(v) && v >= 0) micros[key] = Math.round(v * factor * 1000) / 1000;
+  }
+  const serving = Number(p.serving_quantity);
+  return {
+    id: `off-${p.code || p._id}`,
+    source: "Open Food Facts",
+    name,
+    brand: String(p.brands || "").split(",")[0].trim() || null,
+    per100: {
+      kcal: num(kcal), protein_g: num(n.proteins_100g), carbs_g: num(n.carbohydrates_100g), sugar_g: num(n.sugars_100g),
+      fiber_g: num(n.fiber_100g), fat_g: num(n.fat_100g), satfat_g: num(n["saturated-fat_100g"]), transfat_g: num(n["trans-fat_100g"]),
+    },
+    micros100: Object.keys(micros).length ? micros : null,
+    servingGrams: serving > 0 && serving < 2000 ? Math.round(serving) : null,
+  };
+}
+
+const OFF_FIELDS = "code,product_name,product_name_sv,generic_name,brands,nutriments,serving_quantity";
+
+async function searchOpenFoodFacts(query, country) {
+  const params = new URLSearchParams({
+    search_terms: query, search_simple: "1", action: "process", json: "1",
+    page_size: String(OFF_LIMIT * 2), fields: OFF_FIELDS,
   });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return Array.isArray(data) ? data : [];
-}
-
-async function importUsda(page) {
-  const key = process.env.USDA_API_KEY || "DEMO_KEY";
-  const data = await getJson(
-    `https://api.nal.usda.gov/fdc/v1/foods/list?dataType=SR%20Legacy&pageSize=${USDA_PAGE}&pageNumber=${page}&api_key=${key}`
-  );
-  const foods = Array.isArray(data) ? data : [];
-
-  // komplettera varje livsmedel med omega-3, betakaroten, lykopen och lutein
-  const ids = foods.filter((f) => f.fdcId).map((f) => f.fdcId);
-  const chunks = [];
-  for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
-  const extra = (await mapLimit(chunks, 5, (c) => fetchUsdaBonus(c, key).catch(() => []))).flat();
-  const extraById = new Map(extra.map((f) => [f.fdcId, f.foodNutrients || []]));
-  foods.forEach((f) => {
-    const more = extraById.get(f.fdcId);
-    if (more && more.length) f.foodNutrients = [...(f.foodNutrients || []), ...more];
-  });
-
-  const rows = foods.filter((f) => f.fdcId && f.description).map(usdaRow);
-  if (rows.length) await upsertFoods(rows);
-  return { imported: rows.length, nextCursor: page + 1, done: foods.length < USDA_PAGE };
-}
-
-// ---------- adminsida ----------
-const PAGE = `<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>kärna – import av livsmedel</title>
-<style>body{font-family:system-ui,sans-serif;background:#0e1913;color:#f1f4ee;max-width:640px;margin:40px auto;padding:0 20px}
-input,button{font-size:15px;padding:10px 14px;border-radius:10px;border:1px solid #2c3a30;background:#16231b;color:#f1f4ee}
-button{background:#8fd9a8;color:#0c1f14;font-weight:600;cursor:pointer;margin:6px 6px 0 0;border:none}
-button:disabled{opacity:.5}#log{margin-top:20px;white-space:pre-wrap;font-family:monospace;font-size:13px;color:#9aa79c}</style></head>
-<body><h2>Import av livsmedel</h2>
-<p>Skriv in ditt IMPORT_SECRET och tryck på en knapp i taget. Låt fliken vara öppen tills det står <b>Klart</b>.</p>
-<input id="secret" type="password" placeholder="IMPORT_SECRET" style="width:100%;box-sizing:border-box"><br>
-<button onclick="run('slv')">1. Importera Livsmedelsverket</button>
-<button onclick="run('usda')">2. Importera USDA</button>
-<div id="log"></div>
-<script>
-const log=(t)=>{const el=document.getElementById('log');el.textContent+=t+"\\n";window.scrollTo(0,document.body.scrollHeight);};
-async function run(source){
-  const secret=document.getElementById('secret').value.trim();
-  if(!secret){alert('Skriv in IMPORT_SECRET först');return;}
-  document.querySelectorAll('button').forEach(b=>b.disabled=true);
-  let cursor=source==='usda'?1:0, total=0, errors=0;
-  log('Startar '+(source==='usda'?'USDA':'Livsmedelsverket')+'…');
-  while(true){
-    try{
-      const r=await fetch('/api/import-foods?source='+source+'&cursor='+cursor,{headers:{'x-import-secret':secret}});
-      const d=await r.json();
-      if(!r.ok){log('Fel: '+(d.error||r.status));if(r.status===401)break;if(++errors>5)break;await new Promise(s=>setTimeout(s,3000));continue;}
-      errors=0; total+=d.imported;
-      log('  '+total+' livsmedel inlagda'+(d.total?' av '+d.total:''));
-      if(d.done){log('Klart! '+total+' livsmedel från '+(source==='usda'?'USDA':'Livsmedelsverket')+'.');break;}
-      cursor=d.nextCursor;
-    }catch(e){log('Nätverksfel, försöker igen…');if(++errors>5)break;await new Promise(s=>setTimeout(s,3000));}
-  }
-  document.querySelectorAll('button').forEach(b=>b.disabled=false);
-}
-</script></body></html>`;
-
-export default async function handler(req, res) {
-  const { source, cursor } = req.query || {};
-  if (!source) {
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    return res.status(200).send(PAGE);
-  }
-  if (!process.env.IMPORT_SECRET || req.headers["x-import-secret"] !== process.env.IMPORT_SECRET) {
-    return res.status(401).json({ error: "Fel IMPORT_SECRET (eller så är den inte inlagd i Vercel)." });
-  }
-  if (!process.env.SUPABASE_SECRET_KEY) {
-    return res.status(500).json({ error: "SUPABASE_SECRET_KEY saknas i Vercel." });
+  const offCountry = OFF_COUNTRIES[country];
+  if (offCountry) {
+    params.set("tagtype_0", "countries");
+    params.set("tag_contains_0", "contains");
+    params.set("tag_0", offCountry);
   }
   try {
-    if (source === "slv") return res.status(200).json(await importSlv(Number(cursor) || 0));
-    if (source === "usda") return res.status(200).json(await importUsda(Number(cursor) || 1));
-    return res.status(400).json({ error: "Okänd källa." });
+    const res = await fetchWithTimeout(`https://world.openfoodfacts.org/cgi/search.pl?${params}`, { headers: OFF_HEADERS }, 3500);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.products || []).map(offToCandidate).filter(Boolean).slice(0, OFF_LIMIT);
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    return []; // Open Food Facts är långsam ibland — då visas bara databasträffarna
+  }
+}
+
+async function lookupBarcode(code) {
+  const clean = String(code || "").replace(/\D/g, "");
+  if (!clean) return null;
+  try {
+    const res = await fetchWithTimeout(
+      `https://world.openfoodfacts.org/api/v2/product/${clean}.json?fields=${OFF_FIELDS}`, { headers: OFF_HEADERS }, 6000
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 1 || !data.product) return null;
+    return offToCandidate({ ...data.product, code: data.product.code || clean });
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---------- handler ----------
+export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "Endast POST." });
+  let body = req.body || {};
+  if (typeof body === "string") {
+    try { body = JSON.parse(body || "{}"); } catch (e) { body = {}; }
+  }
+
+  try {
+    if (body.barcode) {
+      return res.status(200).json({ product: await lookupBarcode(body.barcode) });
+    }
+
+    const query = String(body.query || "").trim().slice(0, 100);
+    if (query.length < 2) return res.status(200).json({ results: [] });
+    const country = body.country ? String(body.country).toUpperCase().slice(0, 5) : null;
+
+    const [db, off] = await Promise.all([
+      searchDatabase(query, country).catch((e) => { console.error("[food-lookup] databasfel:", e.message); return []; }),
+      searchOpenFoodFacts(query, country),
+    ]);
+    const results = [...rerank(db, query).slice(0, SHOW_LIMIT), ...off];
+    return res.status(200).json({ results });
+  } catch (e) {
+    console.error("[food-lookup] fel:", e.message);
+    return res.status(200).json({ results: [], error: e.message });
   }
 }
