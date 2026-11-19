@@ -507,6 +507,30 @@ function pieceGrams(name) {
   return hit ? hit[1] : null;
 }
 
+// vardagliga mått utan siffror: "ett glas mjölk" → 2 dl mjölk. Används när AI inte är tillgänglig.
+const VAGUE_UNITS = [
+  [/^(?:ett|1)\s+(?:stort\s+)?glas\s+/, 2, "dl"],
+  [/^(?:en|1)\s+(?:stor\s+)?kopp\s+/, 1, "kopp"],
+  [/^(?:en|1)\s+mugg\s+/, 2.5, "dl"],
+  [/^(?:en|1)\s+(?:liten\s+)?skål\s+/, 250, "g"],
+  [/^(?:en|1)\s+(?:djup\s+)?tallrik\s+/, 350, "g"],
+  [/^(?:en|1)\s+portion\s+/, 300, "g"],
+  [/^(?:en|1)\s+matsked\s+/, 1, "msk"],
+  [/^(?:en|1)\s+tesked\s+/, 1, "tsk"],
+  [/^(?:en|1)\s+näve\s+/, 30, "g"],
+  [/^(?:en|ett|1)\s+(?:bit|skiva)\s+/, 30, "g"],
+];
+function parseVagueAmount(text) {
+  const t = String(text || "").trim().toLowerCase();
+  for (const [re, amount, unit] of VAGUE_UNITS) {
+    if (re.test(t)) {
+      const name = t.replace(re, "").trim();
+      if (name) return { name, amount, unit };
+    }
+  }
+  return null;
+}
+
 // ---------- minne: vilken träff du valde för en viss sökning ----------
 function normalizeQuery(q) {
   return (q || "").toLowerCase().normalize("NFC").replace(/\s+/g, " ").trim();
@@ -1068,12 +1092,16 @@ export default function DotApp() {
     let unit = weightUnit;
     let altQueries = [];
     let parsed = parseFoodInput(name);
-    // ingen mängd i texten (t.ex. "ett glas mjölk", "en tallrik spagetti") → låt AI tolka texten
-    if (!parsed && !amount && name) {
+    // vardagliga mått i texten ("ett glas mjölk", "en skål havregrynsgröt") → tolka utan AI först
+    const vague = !parsed ? parseVagueAmount(name) : null;
+    // ingen siffra i texten → låt AI tolka den (även om du fyllt i mängden själv: då behålls din mängd)
+    if (!parsed && name && (!amount || vague || name.split(/\s+/).length > 1)) {
       setLoading(true); setError("");
       const ai = await aiInterpret(name);
       setLoading(false);
       if (ai) { parsed = ai; altQueries = ai.alternatives || []; }
+      else if (vague) parsed = vague;
+      if (parsed && amount) parsed = { ...parsed, amount: Number(amount.replace(",", ".")) || parsed.amount, unit };
     }
     if (parsed) {
       name = parsed.name;
