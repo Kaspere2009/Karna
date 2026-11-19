@@ -344,9 +344,11 @@ async function aiPickCandidate(query, candidates) {
     const list = candidates.slice(0, 12).map((c, i) => `${i}: ${c.name} (${Math.round(c.per100.kcal)} kcal/100 g)`).join("\n");
     const system =
       "Du väljer vilken rad i en livsmedelsdatabas som bäst motsvarar det användaren åt. Svara ENDAST med JSON: " +
-      '{"index": number} där index är radens nummer, eller -1 om ingen rad passar. ' +
-      "Regler: om användaren inte skrivit okokt/torr/rå, välj tillagad variant (kokt ris, kokt pasta, stekt/kokt kött) framför okokt eller rå. " +
-      "Välj den vanligaste, mest neutrala varianten om inget annat anges. Märkesvaror bara om användaren nämnt märket.";
+      '{"index": number} där index är radens nummer. Välj ALLTID den mest sannolika raden — svara -1 bara om ingen rad alls är samma livsmedel. ' +
+      "Regler: 1) Om användaren inte skrivit okokt/torr/rå: välj tillagad variant (kokt ris/pasta, kokt ägg, stekt/kokt kött). " +
+      "2) Välj ALDRIG barnmat, konserv, pulver, fryst färdigrätt eller kylvara om användaren inte nämnt det — välj hellre hemlagad eller den vanligaste neutrala varianten. " +
+      "3) Välj ALDRIG eko-variant eller märkesvara om användaren inte nämnt det. " +
+      "4) Raden ska vara samma livsmedel, inte en rätt som bara innehåller det (\"ägg\" är inte \"våffla m. ägg\").";
     const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `Användaren skrev: "${query}"\n\nRader:\n${list}` }], system, 50));
     const i = Number(parsed.index);
     return Number.isInteger(i) && i >= 0 && i < candidates.length ? candidates[i] : null;
