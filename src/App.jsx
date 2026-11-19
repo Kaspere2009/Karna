@@ -349,7 +349,7 @@ async function aiPickCandidate(query, candidates) {
       "2) Välj ALDRIG barnmat, konserv, pulver, fryst färdigrätt eller kylvara om användaren inte nämnt det — välj hellre hemlagad eller den vanligaste neutrala varianten. " +
       "3) Välj ALDRIG eko-variant eller märkesvara om användaren inte nämnt det. " +
       "4) Raden ska vara samma livsmedel, inte en rätt som bara innehåller det (\"ägg\" är inte \"våffla m. ägg\").";
-    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `Användaren skrev: "${query}"\n\nRader:\n${list}` }], system, 50));
+    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `Användaren skrev: "${query}"\n\nRader:\n${list}` }], system, 150));
     const i = Number(parsed.index);
     return Number.isInteger(i) && i >= 0 && i < candidates.length ? candidates[i] : null;
   } catch (e) {
@@ -363,7 +363,7 @@ async function aiEstimateGrams(name, amount, unit) {
     const system =
       'Svara ENDAST med JSON: {"grams": number}. Uppskatta hur många gram den angivna mängden av livsmedlet väger. ' +
       "Ta hänsyn till densitet (1 dl havregryn ≈ 35 g, 1 dl mjölk ≈ 103 g, 1 msk olja ≈ 14 g). 1 kopp = 2,4 dl.";
-    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `${amount} ${UNIT_LABELS[unit] || unit} ${name}` }], system, 50));
+    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `${amount} ${UNIT_LABELS[unit] || unit} ${name}` }], system, 150));
     const g = Number(parsed.grams);
     return g > 0 ? g : null;
   } catch (e) {
