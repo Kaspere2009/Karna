@@ -11,7 +11,8 @@ const MAX_BODY_CHARS = 4000000; // ca 4 MB (räcker för en bild)
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Endast POST." });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  // trim: tar bort mellanslag/radbrytningar som lätt följer med när nyckeln klistras in
+  const apiKey = String(process.env.ANTHROPIC_API_KEY || "").replace(/\s+/g, "");
   if (!apiKey) return res.status(503).json({ error: "AI är inte aktiverad än." });
 
   // bara inloggade användare
@@ -26,7 +27,8 @@ export default async function handler(req, res) {
     });
     if (!check.ok) return res.status(401).json({ error: "Inloggningen är ogiltig, logga in igen." });
   } catch (e) {
-    return res.status(502).json({ error: "Kunde inte kontrollera inloggningen." });
+    console.error("[claude] inloggningskontroll misslyckades:", e && e.message);
+    return res.status(502).json({ error: "Kunde inte kontrollera inloggningen: " + (e && e.message) });
   }
 
   let body = req.body || {};
@@ -57,8 +59,10 @@ export default async function handler(req, res) {
       }),
     });
     const data = await r.json().catch(() => ({}));
+    if (!r.ok) console.error("[claude] Anthropic svarade", r.status, JSON.stringify(data).slice(0, 500));
     return res.status(r.status).json(data);
   } catch (e) {
-    return res.status(502).json({ error: "Kunde inte nå AI:n just nu." });
+    console.error("[claude] anropet till Anthropic kraschade:", e && e.message, e && e.cause && e.cause.message);
+    return res.status(502).json({ error: "Kunde inte nå AI:n: " + (e && e.message) });
   }
 }
