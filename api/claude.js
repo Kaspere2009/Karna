@@ -54,6 +54,8 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: Math.min(Number(body.max_tokens) || MAX_TOKENS, MAX_TOKENS),
+        // korta, enkla uppgifter (tolka text, välj rad) — inget "tänkande" behövs, och det skulle äta upp svarsutrymmet
+        thinking: { type: "disabled" },
         ...(system ? { system: String(system) } : {}),
         messages,
       }),
