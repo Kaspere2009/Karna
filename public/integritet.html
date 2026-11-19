@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integritetspolicy – DOT</title>
+<style>
+  :root { --bg: #0e1913; --card: #16231b; --text: #f1f4ee; --dim: #b9c4bb; --faint: #8a988d; --accent: #8fd9a8; --warn: #f2c063; --border: #2c3a30; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 40px 18px 64px; }
+  .logo { font-weight: 700; letter-spacing: .04em; font-size: 20px; margin-bottom: 28px; }
+  .logo span { color: var(--accent); }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 34px 0 8px; color: var(--accent); }
+  p, li { color: var(--dim); }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  strong { color: var(--text); }
+  a { color: var(--accent); }
+  .meta { color: var(--faint); font-size: 13px; margin-bottom: 26px; }
+  .box { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 14px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--dim); }
+  th { color: var(--text); font-weight: 600; }
+  .todo { background: rgba(242,192,99,.15); color: var(--warn); border-radius: 4px; padding: 0 4px; }
+  @media (max-width: 560px) { table, thead, tbody, tr, th, td { display: block; } thead { display: none; } td { border: none; padding: 2px 0; } tr { border-bottom: 1px solid var(--border); padding: 10px 0; } td:first-child { color: var(--text); font-weight: 600; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo">D<span>●</span>T</div>
+  <h1>Integritetspolicy</h1>
+  <p class="meta">Senast uppdaterad: 19 november 2026</p>
+
+  <div class="box">
+    <p style="margin:0"><strong>Kort version:</strong> DOT sparar det du loggar så att du kan se din kost över tid. Vi säljer aldrig din data och visar ingen reklam. Text och bilder du loggar skickas till en AI-tjänst för att tolkas. Du kan radera ditt konto och all din data när du vill.</p>
+  </div>
+
+  <h2>1. Vem ansvarar för dina uppgifter?</h2>
+  <p>Personuppgiftsansvarig är Kasper Estigarribia, Västerås, Sverige, som driver DOT. Kontakt: <span class="todo">[kontaktmejl läggs till]</span>.</p>
+
+  <h2>2. Vilka uppgifter sparas?</h2>
+  <ul>
+    <li><strong>Konto:</strong> e-postadress och lösenord (lösenordet sparas krypterat). Loggar du in med Google får vi din e-postadress från Google.</li>
+    <li><strong>Profil:</strong> ålder, längd, vikt, kön, aktivitetsnivå, mål, land och valda enheter. De används för att räkna ut ditt kalori- och näringsbehov.</li>
+    <li><strong>Det du loggar:</strong> mat och dryck, mängder, tidpunkt, sparade måltider och vilka livsmedel du valt för olika sökningar (så att appen kommer ihåg dina val).</li>
+    <li><strong>Vikt och progressbilder:</strong> om du väljer att lägga in dem.</li>
+    <li><strong>Inloggning i webbläsaren:</strong> en inloggningsnyckel sparas i webbläsarens lokala lagring så att du förblir inloggad. Vi använder inga spårningskakor och ingen reklam- eller analysspårning.</li>
+  </ul>
+  <p>Flera av uppgifterna (vikt, kost, mål) räknas som <strong>hälsouppgifter</strong>, som är känsliga personuppgifter enligt dataskyddsförordningen (GDPR). Vi behandlar dem bara med ditt uttryckliga samtycke.</p>
+
+  <h2>3. Varför och med vilken rätt?</h2>
+  <table>
+    <thead><tr><th>Ändamål</th><th>Rättslig grund</th></tr></thead>
+    <tbody>
+      <tr><td>Ge dig ett konto och spara dina loggar</td><td>Avtal (för att kunna leverera tjänsten)</td></tr>
+      <tr><td>Behandla hälsouppgifter (kost, vikt, mål, bilder)</td><td>Ditt uttryckliga samtycke, som du kan återkalla genom att radera kontot</td></tr>
+      <tr><td>Tolka fri text och foton med AI</td><td>Ditt samtycke – du väljer själv om du loggar med fri text eller foto</td></tr>
+      <tr><td>Felsöka och skydda tjänsten</td><td>Berättigat intresse (korta tekniska loggar)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. AI och näringsvärden</h2>
+  <p>När du loggar med fri text (t.ex. ”ett glas mjölk”) eller foto skickas texten eller bilden till Anthropic, som tillhandahåller AI-modellen Claude. AI:n tolkar bara <em>vad</em> du åt och ungefär <em>hur mycket</em>. Alla näringsvärden kommer från livsmedelsdatabaser (Livsmedelsverket, USDA och Open Food Facts), aldrig från AI:n. Din e-postadress och profil skickas inte till AI-tjänsten. Enligt Anthropics villkor för API-kunder används inte uppgifterna för att träna deras modeller.</p>
+
+  <h2>5. Vilka tjänster hanterar uppgifterna åt oss?</h2>
+  <p>Vi använder följande leverantörer (personuppgiftsbiträden). De får bara behandla uppgifterna för att driva DOT.</p>
+  <table>
+    <thead><tr><th>Leverantör</th><th>Vad de gör</th></tr></thead>
+    <tbody>
+      <tr><td>Supabase</td><td>Databas, inloggning och lagring av progressbilder</td></tr>
+      <tr><td>Vercel</td><td>Driver webbplatsen och serverfunktionerna</td></tr>
+      <tr><td>Anthropic</td><td>AI-tolkning av text och bilder du loggar</td></tr>
+      <tr><td>Google</td><td>Inloggning med Google (om du väljer det) och typsnitt på sidan</td></tr>
+      <tr><td>Open Food Facts</td><td>Sökning på märkesvaror och streckkoder. Bara sökordet eller streckkoden skickas, inga uppgifter om dig.</td></tr>
+    </tbody>
+  </table>
+  <p>Några av leverantörerna är amerikanska bolag, så uppgifter kan föras över till USA. Överföringen sker med de skyddsåtgärder GDPR kräver, till exempel EU-kommissionens standardavtalsklausuler eller EU–USA-ramverket för dataskydd. <span class="todo">[Kontrollera i Supabase vilken region databasen ligger i och skriv in den här.]</span></p>
+
+  <h2>6. Hur länge sparas uppgifterna?</h2>
+  <p>Så länge du har ett konto. Raderar du kontot (Inställningar → Radera konto) tas all din data bort direkt: loggar, profil, måltider, vikt, progressbilder och själva inloggningskontot. Korta tekniska loggar hos våra leverantörer rensas automatiskt efter en begränsad tid.</p>
+
+  <h2>7. Dina rättigheter</h2>
+  <ul>
+    <li><strong>Se dina uppgifter</strong> och få en kopia av dem (även i ett maskinläsbart format).</li>
+    <li><strong>Rätta</strong> felaktiga uppgifter – det mesta kan du ändra själv i appen.</li>
+    <li><strong>Radera</strong> allt – direkt i appen.</li>
+    <li><strong>Återkalla ditt samtycke</strong> när som helst.</li>
+    <li><strong>Begränsa eller invända</strong> mot viss behandling.</li>
+    <li><strong>Klaga</strong> hos Integritetsskyddsmyndigheten (IMY), <a href="https://www.imy.se">imy.se</a>.</li>
+  </ul>
+  <p>Kontakta oss på <span class="todo">[kontaktmejl]</span> för att använda dina rättigheter. Vi svarar inom en månad.</p>
+
+  <h2>8. Ålder</h2>
+  <p>DOT är till för personer som är <strong>16 år eller äldre</strong>.</p>
+
+  <h2>9. Inte medicinsk rådgivning</h2>
+  <p>DOT ger information om näring utifrån offentliga livsmedelsdatabaser. Det är inte medicinsk rådgivning. Har du en sjukdom, ätstörning eller särskilda kostbehov – prata med vården.</p>
+
+  <h2>10. Ändringar</h2>
+  <p>Ändras policyn uppdaterar vi datumet högst upp. Vid större ändringar meddelar vi dig i appen.</p>
+
+  <p style="margin-top:40px"><a href="/">← Tillbaka till DOT</a></p>
+</main>
+</body>
+</html>
