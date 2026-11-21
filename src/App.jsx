@@ -92,6 +92,37 @@ async function supabaseAuth(path, body) {
   return data;
 }
 
+// ---------- progressbilder (privat lagring) ----------
+// I databasen sparas bara sökvägen ("<user-id>/<datum>.jpg"). Bilden visas via en tillfällig signerad länk
+// som bara fungerar en timme — ingen kan se någon annans bilder.
+function photoPathFromUrl(u) {
+  if (!u || typeof u !== "string" || u.startsWith("data:")) return null;
+  const m = u.match(/progress-photos\/([^?]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  return u.includes("://") ? null : u;
+}
+async function signPhotoPaths(accessToken, paths) {
+  const list = [...new Set((paths || []).filter(Boolean))];
+  if (!list.length || !accessToken) return {};
+  try {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/progress-photos`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresIn: 3600, paths: list }),
+    });
+    if (!res.ok) return {};
+    const data = await res.json();
+    const out = {};
+    (Array.isArray(data) ? data : []).forEach((r) => {
+      const url = r.signedURL || r.signedUrl;
+      if (r.path && url && !r.error) out[r.path] = url.startsWith("http") ? url : `${SUPABASE_URL}/storage/v1${url}`;
+    });
+    return out;
+  } catch (e) {
+    return {};
+  }
+}
+
 async function supabaseRest(path, { method = "GET", body, accessToken, params, upsert } = {}) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${path}`);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -886,7 +917,9 @@ export default function DotApp() {
         });
       });
       const weekObj = {};
-      (days || []).forEach((d) => { weekObj[d.log_date] = { weight: d.weight_kg, photo: d.photo_url }; });
+      (days || []).forEach((d) => { weekObj[d.log_date] = { weight: d.weight_kg, photoPath: photoPathFromUrl(d.photo_url) }; });
+      const signed = await signPhotoPaths(accessToken, Object.values(weekObj).map((d) => d.photoPath));
+      Object.values(weekObj).forEach((d) => { d.photo = d.photoPath ? signed[d.photoPath] || null : null; });
       setDayFoodLogs(logsByDay);
       setWeekLog(weekObj);
       setSavedMeals((meals || []).map((m) => ({
@@ -3314,13 +3347,14 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
   const vitaminPct = hasFood ? avgPct(VITAMINS, vitaminTotals) : 0;
   const mineralPct = hasFood ? avgPct(MINERALS, mineralTotals) : 0;
 
-  function updateDay(field, value) {
+  function updateDay(field, value, extra = {}) {
     setWeekLog((w) => {
-      const merged = { ...w[selectedDay], [field]: value };
+      const merged = { ...w[selectedDay], [field]: value, ...extra };
+      if (field === "photo" && !value) merged.photoPath = null;
       if (session) {
         supabaseRest("day_info", {
           method: "POST", accessToken: session.access_token, upsert: true,
-          body: { user_id: session.user.id, log_date: selectedDay, weight_kg: merged.weight || null, photo_url: merged.photo || null },
+          body: { user_id: session.user.id, log_date: selectedDay, weight_kg: merged.weight || null, photo_url: merged.photoPath || null },
         }).catch((e) => console.error("Kunde inte spara:", e.message));
       }
       return { ...w, [selectedDay]: merged };
@@ -3359,8 +3393,9 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
         const errBody = await res.text().catch(() => "");
         throw new Error(`Uppladdningen misslyckades (${res.status}): ${errBody}`);
       }
-      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/progress-photos/${path}?t=${Date.now()}`;
-      updateDay("photo", publicUrl);
+      const signed = await signPhotoPaths(session.access_token, [path]);
+      if (!signed[path]) throw new Error("Bilden laddades upp men kunde inte visas. Ladda om sidan.");
+      updateDay("photo", signed[path], { photoPath: path });
     } catch (err) {
       setPhotoError(err.message);
       console.error("Kunde inte ladda upp bilden:", err.message);
