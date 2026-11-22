@@ -2,19 +2,508 @@ import { useState, useRef, useEffect } from "react";
 import {
   Terminal, Camera, Keyboard, Loader2, Send, Sparkles,
   Check, X, ChevronRight, ChevronLeft, Flame, Dot, ChevronDown, Mail, LayoutGrid, TrendingUp, Home,
-  CalendarDays, BookOpen, Plus, Trash2, Settings, User, Ruler, ShieldCheck, HelpCircle, Info, LogOut
+  CalendarDays, BookOpen, Plus, Trash2, Settings, User, Ruler, ShieldCheck, HelpCircle, Info, LogOut, Globe
 } from "lucide-react";
+
+// ---------- språk (svenska / engelska) ----------
+// Svenska om enhetens språk är svenska, annars engelska. Kan ändras i Inställningar → Språk (sparas i webbläsaren).
+const LANG_STORAGE_KEY = "dot-lang";
+function detectLang() {
+  try {
+    const saved = localStorage.getItem(LANG_STORAGE_KEY);
+    if (saved === "sv" || saved === "en") return saved;
+  } catch (e) { /* ingen lagring — gissa från enheten */ }
+  const nav = (typeof navigator !== "undefined" && (navigator.languages?.[0] || navigator.language)) || "sv";
+  return nav.toLowerCase().startsWith("sv") ? "sv" : "en";
+}
+const LANG = detectLang();
+const LOCALE = LANG === "sv" ? "sv-SE" : "en-GB";
+if (typeof document !== "undefined") document.documentElement.lang = LANG;
+function setLanguage(lang) {
+  try { localStorage.setItem(LANG_STORAGE_KEY, lang); } catch (e) { /* ignoreras */ }
+  window.location.reload();
+}
+// engelska översättningar — nyckeln är den svenska texten exakt som den står i koden
+const EN = {
+ " Det här ämnet finns inte uppmätt för det du loggat idag, så vi kan inte visa någon mängd — det betyder inte att du får för lite.": " This nutrient hasn't been measured for what you logged today, so we can't show an amount — it doesn't mean you're getting too little.",
+ " En portion är {0} g enligt förpackningen.": " One serving is {0} g according to the package.",
+ " · Träff: \"{0}\"": " · Match: \"{0}\"",
+ "(16 år eller äldre).": "(16 or older).",
+ ". Logga dem gärna separat.": ". Feel free to log them separately.",
+ ". Vägde du maten kokt blir det för mycket — tryck": ". If you weighed it cooked, this will be too much — tap",
+ "/100g": "/100g",
+ "AI:n svarade inte.": "The AI didn't respond.",
+ "Aktiv": "Active",
+ "Aktivitetsnivå": "Activity level",
+ "Analysera bild": "Analyze photo",
+ "Analyserar bild…": "Analyzing photo…",
+ "Annat land": "Other country",
+ "Antal portioner": "Number of servings",
+ "Antioxidant som ger tomater och vattenmelon sin röda färg.": "Antioxidant that gives tomatoes and watermelon their red color.",
+ "Antioxidant som kroppen omvandlar till A-vitamin.": "Antioxidant the body converts into vitamin A.",
+ "Antioxidant som skyddar celler mot oxidativ stress.": "Antioxidant that protects cells from oxidative stress.",
+ "Antioxidant som skyddar celler och stöttar sköldkörteln.": "Antioxidant that protects cells and supports the thyroid.",
+ "Antioxidant som stöttar immunförsvar och kollagenbildning.": "Antioxidant that supports the immune system and collagen formation.",
+ "Antioxidanter som samlas i ögat och hjälper till att skydda synen.": "Antioxidants that collect in the eye and help protect your vision.",
+ "Apple — kommer snart": "Apple — coming soon",
+ "Avbryt": "Cancel",
+ "B1 (Tiamin)": "B1 (Thiamine)",
+ "B5 (Pantotensyra)": "B5 (Pantothenic acid)",
+ "B9 (Folat)": "B9 (Folate)",
+ "Baserat på B12, järn, D-vitamin, zink och kolin.": "Based on B12, iron, vitamin D, zinc and choline.",
+ "Baserat på C-vitamin, E-vitamin, zink och biotin.": "Based on vitamin C, vitamin E, zinc and biotin.",
+ "Baserat på C-vitamin, zink, D-vitamin och protein.": "Based on vitamin C, zinc, vitamin D and protein.",
+ "Baserat på D-vitamin, B6, folat och magnesium.": "Based on vitamin D, B6, folate and magnesium.",
+ "Baserat på fibrer mot ett dagsmål på ca 30g.": "Based on fiber against a daily goal of about 30 g.",
+ "Baserat på första och senaste viktloggningen denna vecka.": "Based on the first and latest weigh-in this week.",
+ "Baserat på järn, B-vitaminer och kolhydrater mot ditt dagsmål.": "Based on iron, B vitamins and carbs against your daily goal.",
+ "Baserat på kalium, magnesium, fibrer och lågt natriumintag.": "Based on potassium, magnesium, fiber and low sodium intake.",
+ "Baserat på magnesium, kalcium och B6.": "Based on magnesium, calcium and B6.",
+ "Baserat på protein mot ditt mål, magnesium och zink.": "Based on protein against your goal, magnesium and zinc.",
+ "Baserat på zink, D-vitamin, magnesium och sunt fettintag — visar näringsstöd, inte faktiska hormonnivåer.": "Based on zinc, vitamin D, magnesium and healthy fat intake — shows nutritional support, not actual hormone levels.",
+ "Behov": "Need",
+ "Behövs för att bilda röda blodkroppar och transportera syre.": "Needed to form red blood cells and carry oxygen.",
+ "Behövs för att bilda sköldkörtelhormoner.": "Needed to make thyroid hormones.",
+ "Behövs för bindväv och järnomsättning.": "Needed for connective tissue and iron metabolism.",
+ "Behövs för blodkoagulering och benhälsa.": "Needed for blood clotting and bone health.",
+ "Behövs för nervsystem och röda blodkroppar. Mineralet kobolt sitter i B12-molekylen, så får du i dig B12 får du också kobolt.": "Needed for the nervous system and red blood cells. The mineral cobalt is part of the B12 molecule, so getting B12 also means getting cobalt.",
+ "Behövs som kofaktor i flera viktiga enzymer.": "Needed as a cofactor in several important enzymes.",
+ "Bekräfta & logga": "Confirm & log",
+ "Beskrivning (valfritt)": "Description (optional)",
+ "Betakaroten": "Beta-carotene",
+ "Bibehålla vikt": "Maintain weight",
+ "Bilden laddades upp men kunde inte visas. Ladda om sidan.": "The photo was uploaded but couldn't be shown. Reload the page.",
+ "Bildloggning kräver AI, som inte är aktiverad än. Logga manuellt så länge.": "Photo logging needs AI, which isn't enabled yet. Log manually for now.",
+ "Bra ämnen": "Good stuff",
+ "Bra ämnen idag": "Good stuff today",
+ "Bygga muskler": "Build muscle",
+ "Bygger ben och tänder, viktigt för energiomsättning.": "Builds bones and teeth, important for energy metabolism.",
+ "Bygger och underhåller starka ben och tänder.": "Builds and maintains strong bones and teeth.",
+ "Byt träff": "Change match",
+ "Centimeter (cm)": "Centimeters (cm)",
+ "DOT står för disciplin och tålamod — de två saker som krävs för att lyckas, i livet och med kosten. Små val varje dag, under lång tid.": "DOT stands for Discipline Over Time — what it takes to succeed, in life and with your diet. Small choices every day, over a long time.",
+ "DOT · prototyp v0.1": "DOT · prototype v0.1",
+ "Dagar loggade": "Days logged",
+ "Dagens måltider": "Today's meals",
+ "Danmark": "Denmark",
+ "Data & support": "Data & support",
+ "Dataskydd": "Privacy & data",
+ "Den form av omega-3 som främst finns i fisk och skaldjur.": "The form of omega-3 found mainly in fish and seafood.",
+ "Denna vecka": "This week",
+ "Det här såg jag på bilden": "Here's what I saw in the photo",
+ "Din data (loggar, vikt, måltider och progressbilder) sparas på ditt konto och säljs eller delas aldrig för reklam.": "Your data (logs, weight, meals and progress photos) is stored in your account and is never sold or shared for advertising.",
+ "Din inloggning har gått ut — logga ut och in igen.": "Your session has expired — log out and back in.",
+ "Dina egna värden används alltid. Det du inte fyllt i — t.ex. mättat fett, vitaminer och mineraler — hämtas från det du väljer och märks som uppskattat.": "Your own values are always used. Anything you didn't fill in — e.g. saturated fat, vitamins and minerals — comes from what you pick and is marked as estimated.",
+ "Discipline Over Time.": "Discipline Over Time.",
+ "Du kan när som helst radera ditt konto under Inställningar — då raderas all din data permanent.": "You can delete your account at any time under Settings — all your data is then permanently deleted.",
+ "Då visar vi livsmedel och varor från ditt land först när du loggar.": "We'll show foods and products from your country first when you log.",
+ "Dölj": "Hide",
+ "E-post": "Email",
+ "Egna värden": "Own values",
+ "Eller skriv siffrorna under streckkoden": "Or type the numbers under the barcode",
+ "Energi": "Energy",
+ "Enheter": "Units",
+ "Fett": "Fat",
+ "Fixa min hälsa": "Fix my health",
+ "Fleromättat fett som är viktigt för hjärta och hjärna.": "Polyunsaturated fat that's important for the heart and brain.",
+ "Fluorid": "Fluoride",
+ "Fortsätt": "Continue",
+ "Fortsätt med Google": "Continue with Google",
+ "Fortsätt med mail": "Continue with email",
+ "Fosfor": "Phosphorus",
+ "Fot/tum (ft/in)": "Feet/inches (ft/in)",
+ "Foto": "Photo",
+ "Fråga AI": "Ask AI",
+ "Fråga om värdena": "Ask about the values",
+ "Från matloggningen": "From your food log",
+ "Fullkorn": "Whole grains",
+ "Fyll i kända värden per 100g (valfritt)": "Fill in known values per 100 g (optional)",
+ "Fysiskt tungt jobb och hård träning, dagligen": "Physically demanding job and hard training, daily",
+ "Ger fibrer och långsamma kolhydrater som håller dig mätt längre.": "Provides fiber and slow carbs that keep you full longer.",
+ "Gå ner i vikt": "Lose weight",
+ "Gå upp i vikt": "Gain weight",
+ "Går/rör dig lite dagligen, tränar lätt 1–3 ggr/vecka": "Walk/move a little daily, light training 1–3 times a week",
+ "Har du redan ett konto?": "Already have an account?",
+ "Helt valfritt — dagligen, veckovis, eller aldrig": "Completely optional — daily, weekly, or never",
+ "Hem": "Home",
+ "Hittade inga andra träffar för \"{0}\". Prova att söka med ett annat ord.": "Found no other matches for \"{0}\". Try searching with another word.",
+ "Hittade ingen mat på bilden. Prova en annan bild eller lägg till en beskrivning.": "Couldn't find any food in the photo. Try another photo or add a description.",
+ "Hittade inte \"{0}\" i databasen. Kolla stavningen, prova ett annat ord eller engelska (t.ex. \"chicken breast\") — eller fyll i värdena från förpackningen här nedanför.": "Couldn't find \"{0}\" in the database. Check the spelling, try another word — or fill in the values from the package below.",
+ "Hittade inte \"{0}\" i databasen. Kolla stavningen, prova engelska (t.ex. \"chicken breast\") eller fyll i värdena per 100g nedanför.": "Couldn't find \"{0}\" in the database. Check the spelling, try another word, or fill in the values per 100 g below.",
+ "Hittade inte {0} i databasen. Logga manuellt i stället.": "Couldn't find {0} in the database. Log manually instead.",
+ "Hittades inte i databasen och räknas inte med:": "Not found in the database and not counted:",
+ "Hjälp & support": "Help & support",
+ "Hjälper kroppen omvandla mat till energi.": "Helps the body turn food into energy.",
+ "Hjälper oss räkna ut dina mål mer exakt.": "Helps us calculate your goals more precisely.",
+ "Hjälper till att bryta ner fett och kolhydrater till energi.": "Helps break down fat and carbs into energy.",
+ "Hjälper till att reglera vätskebalans och bildar magsyra. Räknas ut från natriumet, eftersom nästan all klorid kommer från salt och sällan mäts separat.": "Helps regulate fluid balance and forms stomach acid. Calculated from sodium, since almost all chloride comes from salt and is rarely measured separately.",
+ "Hjärna & fokus": "Brain & focus",
+ "Hjärta": "Heart",
+ "Hoppa över — använd bara mina värden": "Skip — use only my values",
+ "Hormonbalans": "Hormone balance",
+ "Hud & hår": "Skin & hair",
+ "Hur aktiv är du i vardagen?": "How active are you day to day?",
+ "Hur gammal är du?": "How old are you?",
+ "Hur lång är du?": "How tall are you?",
+ "Hur mycket väger du?": "How much do you weigh?",
+ "Hur mycket? Fyll i mängden här nedanför — eller skriv den direkt, t.ex. \"150 g ris\" eller \"2 kiwi\".": "How much? Fill in the amount below — or type it directly, e.g. \"150 g rice\" or \"2 kiwis\".",
+ "Hälsoranking": "Health score",
+ "Hälsoranking idag": "Health score today",
+ "Hämtar produkten…": "Fetching the product…",
+ "Här är översikten för denna vecka.": "Here's the overview for this week.",
+ "I centimeter.": "In centimeters.",
+ "I kilo, ungefärligt räcker.": "In kilos, a rough number is fine.",
+ "I pund, ungefärligt räcker.": "In pounds, a rough number is fine.",
+ "I tum.": "In inches.",
+ "Immunförsvar": "Immune system",
+ "Inga sparade måltider än. T.ex. din vanliga PWO-måltid — skapa den en gång, logga den sen på en sekund.": "No saved meals yet. E.g. your usual post-workout meal — create it once, then log it in a second.",
+ "Inga träffar för \"{0}\" — visar träffar för \"{1}\".": "No matches for \"{0}\" — showing matches for \"{1}\".",
+ "Ingen mat loggad den här dagen.": "No food logged this day.",
+ "Inget av dessa — använd mina värden": "None of these — use my values",
+ "Inget av dessa — fyll i själv": "None of these — fill in myself",
+ "Inget konto än?": "No account yet?",
+ "Inget loggat den här dagen.": "Nothing logged this day.",
+ "Inget loggat idag än — här är hur det ser ut tills du loggar något.": "Nothing logged today yet — here's how it looks until you log something.",
+ "Inget loggat än idag.": "Nothing logged yet today.",
+ "Inget upptäckt än idag.": "Nothing detected yet today.",
+ "Ingrediens": "Ingredient",
+ "Ingredienser (": "Ingredients (",
+ "Ingår i aminosyror och behövs för protein- och bindvävsuppbyggnad. Räknas ut från proteinet, eftersom svavlet kommer från proteinets aminosyror.": "Part of amino acids and needed to build protein and connective tissue. Calculated from protein, since the sulfur comes from protein's amino acids.",
+ "Inställningar": "Settings",
+ "Ja, radera": "Yes, delete",
+ "Ja, ta bort": "Yes, remove",
+ "Jag vet inte hur mycket en \"{0}\" väger ungefär — skriv mängden i gram i fältet här nedanför.": "I don't know roughly how much a \"{0}\" weighs — enter the amount in grams in the field below.",
+ "Jag är minst 16 år och godkänner att DOT sparar mina kost- och hälsouppgifter enligt": "I'm at least 16 and agree that DOT stores my diet and health data as described in the",
+ "Jod": "Iodine",
+ "Järn": "Iron",
+ "Kalcium": "Calcium",
+ "Kalender": "Calendar",
+ "Kalium": "Potassium",
+ "Kalorier": "Calories",
+ "Kan stötta insulinets funktion och blodsockerreglering.": "May support insulin function and blood sugar control.",
+ "Kilogram (kg)": "Kilograms (kg)",
+ "Klorid": "Chloride",
+ "Kolhydrater": "Carbs",
+ "Kolin": "Choline",
+ "Kolla din mail för att bekräfta ditt konto, logga sedan in.": "Check your email to confirm your account, then log in.",
+ "Kontaktadress kommer snart": "Contact address coming soon",
+ "Konto": "Account",
+ "Kontorsjobb, mest still, ingen eller sällan träning": "Office job, mostly sitting, little or no training",
+ "Koppar": "Copper",
+ "Krom": "Chromium",
+ "Kunde inte hämta användaren.": "Couldn't fetch the user.",
+ "Kunde inte nå databasen.": "Couldn't reach the database.",
+ "Kvinna": "Female",
+ "Källa:": "Source:",
+ "Kända värden per 100g (valfritt)": "Known values per 100 g (optional)",
+ "Kön": "Sex",
+ "Laddar upp bilden…": "Uploading photo…",
+ "Land": "Country",
+ "Logga": "Log",
+ "Logga allt": "Log all",
+ "Logga in": "Log in",
+ "Logga ut": "Log out",
+ "Logga vikt minst två dagar för att se en förändring över veckan.": "Log your weight on at least two days to see a change over the week.",
+ "Logga vikt några dagar den här veckan så räknar vi ut din trend.": "Log your weight a few days this week and we'll work out your trend.",
+ "Logga vikt och valfria bilder per dag — så mycket eller lite som du vill.": "Log weight and optional photos per day — as much or as little as you like.",
+ "Loggade måltider": "Logged meals",
+ "Loggar in…": "Logging in…",
+ "Loggat": "Logged",
+ "Loggat:": "Logged:",
+ "Lutein & zeaxantin": "Lutein & zeaxanthin",
+ "Lykopen": "Lycopene",
+ "Lägg till": "Add",
+ "Lägg till ingrediens": "Add ingredient",
+ "Lägg till progressbild för": "Add progress photo for",
+ "Längd": "Height",
+ "Längd (": "Height (",
+ "Läs hela integritetspolicyn": "Read the full privacy policy",
+ "Lätt aktiv": "Lightly active",
+ "Lösenord": "Password",
+ "Makros": "Macros",
+ "Makros idag": "Macros today",
+ "Man": "Male",
+ "Mangan": "Manganese",
+ "Matsmältning": "Digestion",
+ "Matvara": "Food",
+ "Med din e-post och ditt lösenord.": "With your email and password.",
+ "Mina måltider": "My meals",
+ "Mineraler": "Minerals",
+ "Mineraler idag": "Minerals today",
+ "Molybden": "Molybdenum",
+ "Muskler": "Muscles",
+ "Mycket aktiv": "Very active",
+ "Mängd": "Amount",
+ "Må bättre allmänt": "Feel better overall",
+ "Mående": "Mood",
+ "Mål (välj gärna flera)": "Goals (pick as many as you like)",
+ "Måltid": "Meal",
+ "Måltider": "Meals",
+ "Måttligt aktiv": "Moderately active",
+ "Namn på måltiden": "Meal name",
+ "Natrium": "Sodium",
+ "Norge": "Norway",
+ "Ny måltid": "New meal",
+ "När du loggar med fri text eller foto skickas texten eller bilden till vår AI-leverantör (Anthropic) för att tolkas — vad du åt och ungefär hur mycket. Näringsvärdena kommer alltid från livsmedelsdatabaserna, aldrig från AI:n.": "When you log with free text or a photo, the text or image is sent to our AI provider (Anthropic) to be interpreted — what you ate and roughly how much. Nutrition values always come from the food databases, never from the AI.",
+ "Näringsdata: Livsmedelsverkets livsmedelsdatabas (Livsmedelsverket, CC BY 4.0), USDA FoodData Central och Open Food Facts (ODbL).": "Nutrition data: the Swedish Food Agency's food database (Livsmedelsverket, CC BY 4.0), USDA FoodData Central and Open Food Facts (ODbL).",
+ "Något gick fel med kontot.": "Something went wrong with your account.",
+ "Obs: värdena gäller": "Note: the values are for",
+ "Okänt fel": "Unknown error",
+ "Om DOT": "About DOT",
+ "Om {0}": "About {0}",
+ "Precis som på förpackningen — DOT räknar om till din faktiska vikt. Lämna resten tomt, så fylls det i från ett liknande livsmedel du väljer.": "Just as on the package — DOT converts it to your actual amount. Leave the rest empty and it's filled in from a similar food you pick.",
+ "Preferenser": "Preferences",
+ "Produkten ({0}) finns inte i databasen än. Sök på namnet i stället, eller fyll i värdena från förpackningen här nedanför.": "The product ({0}) isn't in the database yet. Search by name instead, or fill in the values from the package below.",
+ "Profil": "Profile",
+ "Pund (lbs)": "Pounds (lbs)",
+ "Radera konto": "Delete account",
+ "Reglerar vätskebalans och muskelfunktion, inklusive hjärtat.": "Regulates fluid balance and muscle function, including the heart.",
+ "Reglerar vätskebalans och nervsignaler, men lätt att få i överflöd.": "Regulates fluid balance and nerve signals, but easy to get too much of.",
+ "Räkna ut mina mål": "Calculate my goals",
+ "Räknar ut värden…": "Calculating values…",
+ "Räknar ut…": "Calculating…",
+ "Räknat utanför träningspass.": "Outside of workouts.",
+ "Se exempel på veckosammanfattning →": "See an example weekly summary →",
+ "Selen": "Selenium",
+ "Senaste": "Recent",
+ "Skanna streckkod": "Scan barcode",
+ "Skannad produkt:": "Scanned product:",
+ "Skapa konto": "Create account",
+ "Skapa ny måltid": "Create new meal",
+ "Skapar konto…": "Creating account…",
+ "Skriv en fråga…": "Type a question…",
+ "Skriv hur många gram du åt.": "Enter how many grams you ate.",
+ "Spara": "Save",
+ "Spara måltid": "Save meal",
+ "Spara måltider du äter ofta — logga dem sen med ett klick istället för att fylla i allt igen.": "Save meals you eat often — then log them with one tap instead of filling everything in again.",
+ "Spara ändringar": "Save changes",
+ "Sparat till din dagslogg.": "Saved to your daily log.",
+ "Sparat — dina mål är omräknade.": "Saved — your goals have been recalculated.",
+ "Stillasittande": "Sedentary",
+ "Storbritannien": "United Kingdom",
+ "Stäng": "Close",
+ "Stärker tandemaljen och motverkar karies.": "Strengthens tooth enamel and helps prevent cavities.",
+ "Stöttar benbildning och ämnesomsättning.": "Supports bone formation and metabolism.",
+ "Stöttar hår, hud och ämnesomsättning.": "Supports hair, skin and metabolism.",
+ "Stöttar immunförsvar och sårläkning.": "Supports the immune system and wound healing.",
+ "Stöttar ämnesomsättning och nervsystem.": "Supports metabolism and the nervous system.",
+ "Stötte du på ett problem, eller har du en idé till en ny funktion? Hör av dig.": "Ran into a problem, or have an idea for a new feature? Get in touch.",
+ "Svavel": "Sulfur",
+ "Sverige": "Sweden",
+ "Sök": "Search",
+ "Söker…": "Searching…",
+ "Sömn": "Sleep",
+ "T.ex. \"1 kopp grönt te\" — skriv 1 och välj kopp. DOT räknar om till gram åt dig.": "E.g. \"1 cup green tea\" — enter 1 and choose cup. DOT converts it to grams for you.",
+ "T.ex. \"varför gissar du så mycket protein?\" eller \"är det här en stor banan?\"": "E.g. \"is this a lot of protein?\" or \"is this a large banana?\"",
+ "Ta bort": "Remove",
+ "Ta eller välj en bild": "Take or choose a photo",
+ "Tillbaka": "Back",
+ "Tillbaka hem": "Back home",
+ "Titta tillbaka på vilken dag som helst — bläddra hur långt bak du vill.": "Look back at any day — scroll back as far as you like.",
+ "Totalt": "Total",
+ "Tryck på en rad för att ändra mängd eller ta bort.": "Tap a row to change the amount or remove it.",
+ "Träff:": "Match:",
+ "Träffar för \"{0}\" — värdena är per 100 g. Du loggar {1} {2}.": "Matches for \"{0}\" — values are per 100 g. You're logging {1} {2}.",
+ "Tränar 3–5 ggr/vecka, en del rörelse i vardagen": "Train 3–5 times a week, some movement in daily life",
+ "Tränar hårt 6–7 ggr/vecka, eller fysiskt jobb + viss träning": "Train hard 6–7 times a week, or physical job + some training",
+ "Tyskland": "Germany",
+ "Uppladdningen misslyckades ({0}): {1}": "Upload failed ({0}): {1}",
+ "Uppskattat stöd från det du ätit — inte ett medicinskt mått.": "Estimated support from what you've eaten — not a medical measure.",
+ "Vad liknar din vara mest?": "What is your product most like?",
+ "Vad vill du fokusera på?": "What do you want to focus on?",
+ "Var bor du?": "Where do you live?",
+ "Veckosammanfattning": "Weekly summary",
+ "Version 0.1 (prototyp)": "Version 0.1 (prototype)",
+ "Vet du t.ex. protein- eller fettinnehållet per 100g (från förpackningen)? Fyll i det du vet — resten hämtas från ett liknande livsmedel.": "Do you know e.g. the protein or fat content per 100 g (from the package)? Fill in what you know — the rest comes from a similar food.",
+ "Vikt": "Weight",
+ "Vikt (": "Weight (",
+ "Vikt denna dag (": "Weight this day (",
+ "Vikterna är uppskattade från bilden. Värdena kommer från livsmedelsdatabasen. Ta bort det som inte stämmer — mängderna kan du ändra efter loggningen genom att trycka på raden.": "The amounts are estimated from the photo. The values come from the food database. Remove anything that's wrong — you can change the amounts after logging by tapping the row.",
+ "Viktförändring": "Weight change",
+ "Viktigt för celldelning, extra viktigt vid graviditet.": "Important for cell division, especially during pregnancy.",
+ "Viktigt för energiproduktion och cellfunktion.": "Important for energy production and cell function.",
+ "Viktigt för kalciumupptag och starka ben.": "Important for calcium absorption and strong bones.",
+ "Viktigt för lever-, muskel- och hjärnfunktion.": "Important for liver, muscle and brain function.",
+ "Viktigt för muskel- och nervfunktion.": "Important for muscle and nerve function.",
+ "Viktigt för protein-ämnesomsättning och immunförsvar.": "Important for protein metabolism and the immune system.",
+ "Viktigt för syn, hud och immunförsvar.": "Important for vision, skin and the immune system.",
+ "Vilken menar du?": "Which one do you mean?",
+ "Vilken menar du? (värden per 100 g)": "Which one do you mean? (values per 100 g)",
+ "Vilket kön har du?": "What's your sex?",
+ "Visa": "Show",
+ "Visas bara här om du faktiskt fått i dig något av det. Uppmätta ämnen visas med mängd; övriga med en ungefärlig nivå (låg–mycket hög) utifrån typiska halter i livsmedlet.": "Only shown here if you've actually had some. Measured substances show an amount; others show a rough level (low–very high) based on typical content in the food.",
+ "Vitaminer": "Vitamins",
+ "Vitaminer idag": "Vitamins today",
+ "Vitaminer och mineraler finns inte uppmätta för den här träffen, så de räknas inte med.": "Vitamins and minerals haven't been measured for this match, so they're not counted.",
+ "Vitaminer, mineraler och bra ämnen läggs till din dagliga översikt när du loggar — se fliken": "Vitamins, minerals and good stuff are added to your daily overview when you log — see the tab",
+ "Välj gärna flera — det här styr hur vi sätter dina mål, du kan ändra senare.": "Pick as many as you like — this shapes how we set your goals. You can change it later.",
+ "Välkommen": "Welcome",
+ "Zink": "Zinc",
+ "du@exempel.se": "you@example.com",
+ "eller": "or",
+ "för hela bilden.": "for the full picture.",
+ "förhandsvisning": "preview",
+ "g · K": "g · C",
+ "ingen data": "no data",
+ "integritetspolicyn": "privacy policy",
+ "kcal kvar": "kcal left",
+ "kcal per 100 g.": "kcal per 100 g.",
+ "kopp": "cup",
+ "msk": "tbsp",
+ "och välj en kokt variant.": "and choose a cooked option.",
+ "okokt (torr) vikt": "uncooked (dry) weight",
+ "progressbild": "progress photo",
+ "spårmängd": "trace amount",
+ "styck": "pcs",
+ "t.ex. \"150 g ris\" eller \"2 kiwi\"": "e.g. \"150 g rice\" or \"2 kiwis\"",
+ "t.ex. 164": "e.g. 164",
+ "t.ex. 7310500088853": "e.g. 7310500088853",
+ "t.ex. 74.5": "e.g. 74.5",
+ "t.ex. Min PWO-måltid": "e.g. My post-workout meal",
+ "t.ex. kycklingfilé": "e.g. chicken breast",
+ "t.ex. kycklingwrap med lite majonnäs, ingen ost": "e.g. chicken wrap with a little mayo, no cheese",
+ "tsk": "tsp",
+ "tum": "in",
+ "uppskattat": "estimated",
+ "varav EPA + DHA": "of which EPA + DHA",
+ "varav fibrer": "of which fiber",
+ "varav mättat": "of which saturated",
+ "varav sockerarter": "of which sugars",
+ "varav transfett": "of which trans fat",
+ "visas inte — de finns inte uppmätta för det du ätit idag.": "aren't shown — they haven't been measured for what you ate today.",
+ "· ca": "· approx.",
+ "· ditt val": "· your choice",
+ "· okokt vikt": "· uncooked weight",
+ "Ändra mängden om du åt mer eller mindre.": "Change the amount if you ate more or less.",
+ "Ändringen gäller direkt — vikt och längd visas och räknas om i din valda enhet överallt i appen (sparas alltid i kg/cm internt).": "The change applies right away — weight and height are shown and converted to your chosen unit everywhere in the app (always stored in kg/cm internally).",
+ "Är du ny godkänner du att DOT sparar dina kost- och hälsouppgifter enligt": "If you're new, you agree that DOT stores your diet and health data as described in the",
+ "Är du säker? All din data (loggar, måltider, vikt, bilder) raderas permanent.": "Are you sure? All your data (logs, meals, weight, photos) will be permanently deleted.",
+ "Äta mer varierat": "Eat more varied",
+ "Ätit": "Eaten",
+ "Ålder": "Age",
+ "Ålder påverkar din dagliga energiförbrukning.": "Age affects your daily energy use.",
+ "Ålder, vikt, mål och aktivitetsnivå": "Age, weight, goals and activity level",
+ "Översikt": "Overview",
+ "— svep för fler": "— swipe for more",
+ "•••••••• (minst 6 tecken)": "•••••••• (at least 6 characters)",
+ "← Tillbaka": "← Back",
+ "🎉 1 hel vecka avklarad!": "🎉 1 full week done!",
+ ", kompletterat med USDA FoodData Central": ", supplemented with USDA FoodData Central",
+ "Livsmedelsverkets livsmedelsdatabas": "Swedish Food Agency food database",
+ "Livsmedelsverkets livsmedelsdatabas, kompletterat med USDA FoodData Central": "Swedish Food Agency food database, supplemented with USDA FoodData Central",
+ "USDA FoodData Central, kompletterat med USDA FoodData Central": "USDA FoodData Central",
+ "Appen laddas om på det valda språket. Livsmedelsnamnen visas på engelska när det finns en översättning.": "The app reloads in the chosen language. Food names are shown in English when a translation exists.",
+ "Bra jobbat, du är på rätt spår mot ditt mål! 📈": "Nice work, you're on track toward your goal! 📈",
+ "Bra jobbat, du är på rätt spår mot ditt mål! 📉": "Nice work, you're on track toward your goal! 📉",
+ "Finns i:": "Found in:",
+ "Mån": "Mon",
+ "Tis": "Tue",
+ "Ons": "Wed",
+ "Tors": "Thu",
+ "Fre": "Fri",
+ "Lör": "Sat",
+ "Sön": "Sun",
+ "God eftermiddag": "Good afternoon",
+ "God kväll": "Good evening",
+ "God morgon": "Good morning",
+ "God natt": "Good night",
+ "Mycket låg": "Very low",
+ "Låg": "Low",
+ "Medel": "Medium",
+ "Hög": "High",
+ "Mycket hög": "Very high",
+ "Inte den bästa veckan för viktnedgång, men du kommer dit. 💪": "Not the best week for weight loss, but you'll get there. 💪",
+ "Inte den bästa veckan för viktuppgång, men du kommer dit. 💪": "Not the best week for weight gain, but you'll get there. 💪",
+ "Märkesvara": "Brand product",
+ "Stabil vecka — precis vad som passar om du vill bibehålla vikten. 👍": "Steady week — just right if you want to maintain your weight. 👍",
+ "Vikten låg still — kolla gärna över kalorierna om nedgång är målet.": "Your weight held steady — maybe look over your calories if losing is the goal.",
+ "Vikten låg still — kolla gärna över kalorierna om uppgång är målet.": "Your weight held steady — maybe look over your calories if gaining is the goal.",
+ "Vikten rörde sig en del denna vecka — helt normalt, följ trenden över flera veckor.": "Your weight moved around a bit this week — completely normal, follow the trend over several weeks.",
+ "ca": "approx.",
+ "AI är inte aktiverad än.": "AI isn't enabled yet.",
+ "Användarens beskrivning: {0}": "User's description: {0}",
+ "Ingen beskrivning.": "No description.",
+ "Ingrediensen är tillagd, men vitaminer och mineraler finns inte uppmätta för den.": "The ingredient was added, but vitamins and minerals haven't been measured for it.",
+ "Kunde inte nå AI:n just nu.": "Couldn't reach the AI right now.",
+ "Kunde inte radera kontot: ": "Couldn't delete the account: ",
+ "Kunde inte spara profilen: ": "Couldn't save your profile: ",
+ "Kunde inte spara till databasen: ": "Couldn't save to the database: ",
+ "Kunde inte spara ändringen: ": "Couldn't save the change: ",
+ "Kunde inte starta kameran. Tillåt kameran i webbläsaren, eller skriv streckkoden här nedanför.": "Couldn't start the camera. Allow camera access in your browser, or type the barcode below.",
+ "Kunde inte svara just nu.": "Couldn't answer right now.",
+ "Kunde inte ta bort från databasen: ": "Couldn't remove from the database: ",
+ "Kunde inte tolka bilden: ": "Couldn't interpret the photo: ",
+ " Försök igen om en stund.": " Try again in a moment.",
+ "Rikta kameran mot streckkoden": "Point the camera at the barcode",
+ "Vet inte vad en \"{0}\" väger — välj gram i stället.": "Don't know what a \"{0}\" weighs — choose grams instead.",
+ "Katekiner": "Catechins",
+ "Antioxidanterna i te och kakao. Kan stödja hjärta och blodkärl.": "The antioxidants in tea and cocoa. May support the heart and blood vessels.",
+ "L-teanin": "L-theanine",
+ "Aminosyra i te som ger ett lugnt fokus och kan mildra koffeinets påslag. Effekter ses oftast vid 100–200 mg.": "Amino acid in tea that gives calm focus and can soften caffeine's kick. Effects are usually seen at 100–200 mg.",
+ "Koffein": "Caffeine",
+ "Pigger upp och skärper fokus. Lagom för de flesta är ungefär 100–200 mg om dagen, helst före lunch — redan runt 100 mg senare på dagen kan försämra sömnen.": "Boosts alertness and focus. Around 100–200 mg a day suits most people, ideally before lunch — even about 100 mg later in the day can disturb sleep.",
+ "Klorogensyra": "Chlorogenic acid",
+ "Polyfenol med antioxiderande effekt — kaffe är den största källan.": "Polyphenol with an antioxidant effect — coffee is the biggest source.",
+ "Teobromin": "Theobromine",
+ "Milt uppiggande ämne i kakao, mildare och mer långvarigt än koffein.": "Mild stimulant in cocoa, gentler and longer-lasting than caffeine.",
+ "Antocyaniner": "Anthocyanins",
+ "Färgämnen i blå och röda bär och grönsaker som fungerar som antioxidanter.": "Pigments in blue and red berries and vegetables that act as antioxidants.",
+ "Ellagitanniner": "Ellagitannins",
+ "Polyfenoler i bär och nötter som tarmfloran omvandlar till nyttiga ämnen.": "Polyphenols in berries and nuts that gut bacteria turn into beneficial compounds.",
+ "Sulforafan": "Sulforaphane",
+ "Bildas när man tuggar korsblommiga grönsaker och stöttar kroppens egna skyddssystem.": "Forms when you chew cruciferous vegetables and supports the body's own defense systems.",
+ "Svavelförening i vitlök som bildas när den hackas eller krossas.": "Sulfur compound in garlic that forms when it's chopped or crushed.",
+ "Kvercetin": "Quercetin",
+ "Flavonoid med antioxiderande egenskaper, finns rikligt i lök.": "Flavonoid with antioxidant properties, plentiful in onions.",
+ "Kurkumin": "Curcumin",
+ "Det gula ämnet i gurkmeja. Tas upp bättre tillsammans med svartpeppar och fett.": "The yellow compound in turmeric. Better absorbed together with black pepper and fat.",
+ "Betaglukan": "Beta-glucan",
+ "Löslig fiber i havre och korn. Runt 3 g om dagen kan bidra till lägre kolesterol.": "Soluble fiber in oats and barley. About 3 g a day can help lower cholesterol.",
+ "Kostnitrat": "Dietary nitrate",
+ "Omvandlas i kroppen till kväveoxid, som vidgar blodkärlen.": "Converted in the body to nitric oxide, which widens blood vessels.",
+ "Olivpolyfenoler": "Olive polyphenols",
+ "Antioxidanter i olivolja, främst i extra jungfruolja.": "Antioxidants in olive oil, mainly extra virgin.",
+ "Flavonoid i citrusfrukter som kan stödja blodkärlen.": "Flavonoid in citrus fruits that may support blood vessels.",
+ "Det starka ämnet i ingefära, kan lindra illamående.": "The pungent compound in ginger, may ease nausea.",
+ "Lignaner": "Lignans",
+ "Växtämnen i fröer och fullkorn med antioxiderande egenskaper.": "Plant compounds in seeds and whole grains with antioxidant properties.",
+ "Isoflavoner": "Isoflavones",
+ "Växtämnen i soja som kan stödja hjärta och benhälsa.": "Plant compounds in soy that may support heart and bone health.",
+ "Ergotionein": "Ergothioneine",
+ "Antioxidant som främst finns i svamp.": "Antioxidant found mainly in mushrooms.",
+ "Astaxantin": "Astaxanthin",
+ "Rött färgämne i lax och skaldjur med stark antioxiderande effekt. Vildfångad lax har mycket mer än odlad.": "Red pigment in salmon and shellfish with a strong antioxidant effect. Wild salmon has much more than farmed.",
+ "Kreatin": "Creatine",
+ "Ger musklerna snabb energi vid korta, intensiva ansträngningar. Finns i kött och fisk.": "Gives muscles quick energy during short, intense efforts. Found in meat and fish.",
+ "Probiotika": "Probiotics",
+ "Levande mjölksyrabakterier som kan stödja tarmfloran.": "Live lactic acid bacteria that may support gut flora.",
+ "Det starka ämnet i chili.": "The hot compound in chili.",
+ "Google-inloggningen misslyckades: ": "Google sign-in failed: ",
+ "gram": "grams"
+};
+
+// tr("svensk text") → engelsk text om språket är engelska (faller tillbaka på svenska om översättning saknas)
+function tr(s) {
+  if (LANG === "sv" || typeof s !== "string") return s;
+  const v = EN[s];
+  return v === undefined ? s : v;
+}
+// trf("Hittade inte \"{0}\"", namn) → med insatta värden
+function trf(s, ...args) {
+  return String(tr(s)).replace(/\{(\d+)\}/g, (_, i) => (args[i] ?? ""));
+}
+const PRIVACY_URL = LANG === "sv" ? "/integritet.html" : "/privacy.html";
 
 // fields the user can optionally fill in per 100g, matching a package label
 const KNOWN_FIELDS = [
-  { key: "kcal", label: "Kalorier", unit: "kcal" },
-  { key: "protein_g", label: "Protein", unit: "g" },
-  { key: "carbs_g", label: "Kolhydrater", unit: "g" },
-  { key: "sugar_g", label: "varav sockerarter", unit: "g", sub: true },
-  { key: "fiber_g", label: "varav fibrer", unit: "g", sub: true },
-  { key: "fat_g", label: "Fett", unit: "g" },
-  { key: "satfat_g", label: "varav mättat", unit: "g", sub: true },
-  { key: "transfat_g", label: "varav transfett", unit: "g", sub: true },
+  { key: "kcal", label: tr("Kalorier"), unit: "kcal" },
+  { key: "protein_g", label: tr("Protein"), unit: "g" },
+  { key: "carbs_g", label: tr("Kolhydrater"), unit: "g" },
+  { key: "sugar_g", label: tr("varav sockerarter"), unit: "g", sub: true },
+  { key: "fiber_g", label: tr("varav fibrer"), unit: "g", sub: true },
+  { key: "fat_g", label: tr("Fett"), unit: "g" },
+  { key: "satfat_g", label: tr("varav mättat"), unit: "g", sub: true },
+  { key: "transfat_g", label: tr("varav transfett"), unit: "g", sub: true },
 ];
 
 // ---------- design tokens ----------
@@ -66,8 +555,8 @@ function parseHeightInput(val, unit) { const n = Number(val); if (isNaN(n)) retu
 
 // ---------- land ----------
 const COUNTRIES = [
-  { v: "SE", l: "Sverige" }, { v: "NO", l: "Norge" }, { v: "DK", l: "Danmark" }, { v: "FI", l: "Finland" },
-  { v: "DE", l: "Tyskland" }, { v: "GB", l: "Storbritannien" }, { v: "US", l: "USA" }, { v: "OTHER", l: "Annat land" },
+  { v: "SE", l: tr("Sverige") }, { v: "NO", l: tr("Norge") }, { v: "DK", l: tr("Danmark") }, { v: "FI", l: tr("Finland") },
+  { v: "DE", l: tr("Tyskland") }, { v: "GB", l: tr("Storbritannien") }, { v: "US", l: tr("USA") }, { v: "OTHER", l: tr("Annat land") },
 ];
 function guessCountry() {
   const lang = (typeof navigator !== "undefined" && navigator.language) || "";
@@ -88,7 +577,7 @@ async function supabaseAuth(path, body) {
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error_description || data.msg || data.error || "Något gick fel med kontot.");
+  if (!res.ok) throw new Error(data.error_description || data.msg || data.error || tr("Något gick fel med kontot."));
   return data;
 }
 
@@ -135,7 +624,7 @@ async function supabaseRest(path, { method = "GET", body, accessToken, params, u
   const res = await fetch(url.toString(), { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || "Kunde inte nå databasen.");
+    throw new Error(err.message || tr("Kunde inte nå databasen."));
   }
   if (res.status === 204) return null;
   return res.json();
@@ -174,7 +663,7 @@ async function supabaseGetUser(accessToken) {
     headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}` },
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.msg || data.error_description || "Kunde inte hämta användaren.");
+  if (!res.ok) throw new Error(data.msg || data.error_description || tr("Kunde inte hämta användaren."));
   return data;
 }
 
@@ -200,71 +689,71 @@ const DAILY_TARGETS = { kcal: 2400, protein_g: 150, carbs_g: 280, fat_g: 80 };
 
 // canonical lists — always shown in full on the dashboard, even at 0
 const VITAMINS = [
-  { key: "vit_a", name: "Vitamin A", unit: "µg", rdi: 800, blurb: "Viktigt för syn, hud och immunförsvar." },
-  { key: "vit_c", name: "Vitamin C", unit: "mg", rdi: 80, blurb: "Antioxidant som stöttar immunförsvar och kollagenbildning." },
-  { key: "vit_d", name: "Vitamin D", unit: "µg", rdi: 5, blurb: "Viktigt för kalciumupptag och starka ben." },
-  { key: "vit_e", name: "Vitamin E", unit: "mg", rdi: 12, blurb: "Antioxidant som skyddar celler mot oxidativ stress." },
-  { key: "vit_k", name: "Vitamin K", unit: "µg", rdi: 75, blurb: "Behövs för blodkoagulering och benhälsa." },
-  { key: "b1", name: "B1 (Tiamin)", unit: "mg", rdi: 1.1, blurb: "Hjälper kroppen omvandla mat till energi." },
-  { key: "b2", name: "B2 (Riboflavin)", unit: "mg", rdi: 1.4, blurb: "Viktigt för energiproduktion och cellfunktion." },
-  { key: "b3", name: "B3 (Niacin)", unit: "mg", rdi: 16, blurb: "Stöttar ämnesomsättning och nervsystem." },
-  { key: "b5", name: "B5 (Pantotensyra)", unit: "mg", rdi: 6, blurb: "Hjälper till att bryta ner fett och kolhydrater till energi." },
-  { key: "b6", name: "B6", unit: "mg", rdi: 1.4, blurb: "Viktigt för protein-ämnesomsättning och immunförsvar." },
-  { key: "b7", name: "B7 (Biotin)", unit: "µg", rdi: 50, blurb: "Stöttar hår, hud och ämnesomsättning." },
-  { key: "b9", name: "B9 (Folat)", unit: "µg", rdi: 200, blurb: "Viktigt för celldelning, extra viktigt vid graviditet." },
-  { key: "b12", name: "B12", unit: "µg", rdi: 2.5, blurb: "Behövs för nervsystem och röda blodkroppar. Mineralet kobolt sitter i B12-molekylen, så får du i dig B12 får du också kobolt." },
-  { key: "choline", name: "Kolin", unit: "mg", rdi: 400, blurb: "Viktigt för lever-, muskel- och hjärnfunktion." },
+  { key: "vit_a", name: tr("Vitamin A"), unit: "µg", rdi: 800, blurb: tr("Viktigt för syn, hud och immunförsvar.") },
+  { key: "vit_c", name: tr("Vitamin C"), unit: "mg", rdi: 80, blurb: tr("Antioxidant som stöttar immunförsvar och kollagenbildning.") },
+  { key: "vit_d", name: tr("Vitamin D"), unit: "µg", rdi: 5, blurb: tr("Viktigt för kalciumupptag och starka ben.") },
+  { key: "vit_e", name: tr("Vitamin E"), unit: "mg", rdi: 12, blurb: tr("Antioxidant som skyddar celler mot oxidativ stress.") },
+  { key: "vit_k", name: tr("Vitamin K"), unit: "µg", rdi: 75, blurb: tr("Behövs för blodkoagulering och benhälsa.") },
+  { key: "b1", name: tr("B1 (Tiamin)"), unit: "mg", rdi: 1.1, blurb: tr("Hjälper kroppen omvandla mat till energi.") },
+  { key: "b2", name: tr("B2 (Riboflavin)"), unit: "mg", rdi: 1.4, blurb: tr("Viktigt för energiproduktion och cellfunktion.") },
+  { key: "b3", name: tr("B3 (Niacin)"), unit: "mg", rdi: 16, blurb: tr("Stöttar ämnesomsättning och nervsystem.") },
+  { key: "b5", name: tr("B5 (Pantotensyra)"), unit: "mg", rdi: 6, blurb: tr("Hjälper till att bryta ner fett och kolhydrater till energi.") },
+  { key: "b6", name: tr("B6"), unit: "mg", rdi: 1.4, blurb: tr("Viktigt för protein-ämnesomsättning och immunförsvar.") },
+  { key: "b7", name: tr("B7 (Biotin)"), unit: "µg", rdi: 50, blurb: tr("Stöttar hår, hud och ämnesomsättning.") },
+  { key: "b9", name: tr("B9 (Folat)"), unit: "µg", rdi: 200, blurb: tr("Viktigt för celldelning, extra viktigt vid graviditet.") },
+  { key: "b12", name: tr("B12"), unit: "µg", rdi: 2.5, blurb: tr("Behövs för nervsystem och röda blodkroppar. Mineralet kobolt sitter i B12-molekylen, så får du i dig B12 får du också kobolt.") },
+  { key: "choline", name: tr("Kolin"), unit: "mg", rdi: 400, blurb: tr("Viktigt för lever-, muskel- och hjärnfunktion.") },
 ];
 const MINERALS = [
-  { key: "calcium", name: "Kalcium", unit: "mg", rdi: 800, blurb: "Bygger och underhåller starka ben och tänder." },
-  { key: "iron", name: "Järn", unit: "mg", rdi: 14, blurb: "Behövs för att bilda röda blodkroppar och transportera syre." },
-  { key: "magnesium", name: "Magnesium", unit: "mg", rdi: 375, blurb: "Viktigt för muskel- och nervfunktion." },
-  { key: "zinc", name: "Zink", unit: "mg", rdi: 10, blurb: "Stöttar immunförsvar och sårläkning." },
-  { key: "potassium", name: "Kalium", unit: "mg", rdi: 2000, blurb: "Reglerar vätskebalans och muskelfunktion, inklusive hjärtat." },
-  { key: "phosphorus", name: "Fosfor", unit: "mg", rdi: 700, blurb: "Bygger ben och tänder, viktigt för energiomsättning." },
-  { key: "selenium", name: "Selen", unit: "µg", rdi: 55, blurb: "Antioxidant som skyddar celler och stöttar sköldkörteln." },
-  { key: "copper", name: "Koppar", unit: "mg", rdi: 1, blurb: "Behövs för bindväv och järnomsättning." },
-  { key: "manganese", name: "Mangan", unit: "mg", rdi: 2, blurb: "Stöttar benbildning och ämnesomsättning." },
-  { key: "iodine", name: "Jod", unit: "µg", rdi: 150, blurb: "Behövs för att bilda sköldkörtelhormoner." },
-  { key: "sodium", name: "Natrium", unit: "mg", rdi: 2400, blurb: "Reglerar vätskebalans och nervsignaler, men lätt att få i överflöd." },
-  { key: "chloride", name: "Klorid", unit: "mg", rdi: 2300, blurb: "Hjälper till att reglera vätskebalans och bildar magsyra. Räknas ut från natriumet, eftersom nästan all klorid kommer från salt och sällan mäts separat." },
-  { key: "chromium", name: "Krom", unit: "µg", rdi: 40, blurb: "Kan stötta insulinets funktion och blodsockerreglering." },
-  { key: "molybdenum", name: "Molybden", unit: "µg", rdi: 50, blurb: "Behövs som kofaktor i flera viktiga enzymer." },
-  { key: "fluoride", name: "Fluorid", unit: "mg", rdi: 3, blurb: "Stärker tandemaljen och motverkar karies." },
-  { key: "sulfur", name: "Svavel", unit: "mg", rdi: 900, blurb: "Ingår i aminosyror och behövs för protein- och bindvävsuppbyggnad. Räknas ut från proteinet, eftersom svavlet kommer från proteinets aminosyror." },
+  { key: "calcium", name: tr("Kalcium"), unit: "mg", rdi: 800, blurb: tr("Bygger och underhåller starka ben och tänder.") },
+  { key: "iron", name: tr("Järn"), unit: "mg", rdi: 14, blurb: tr("Behövs för att bilda röda blodkroppar och transportera syre.") },
+  { key: "magnesium", name: tr("Magnesium"), unit: "mg", rdi: 375, blurb: tr("Viktigt för muskel- och nervfunktion.") },
+  { key: "zinc", name: tr("Zink"), unit: "mg", rdi: 10, blurb: tr("Stöttar immunförsvar och sårläkning.") },
+  { key: "potassium", name: tr("Kalium"), unit: "mg", rdi: 2000, blurb: tr("Reglerar vätskebalans och muskelfunktion, inklusive hjärtat.") },
+  { key: "phosphorus", name: tr("Fosfor"), unit: "mg", rdi: 700, blurb: tr("Bygger ben och tänder, viktigt för energiomsättning.") },
+  { key: "selenium", name: tr("Selen"), unit: "µg", rdi: 55, blurb: tr("Antioxidant som skyddar celler och stöttar sköldkörteln.") },
+  { key: "copper", name: tr("Koppar"), unit: "mg", rdi: 1, blurb: tr("Behövs för bindväv och järnomsättning.") },
+  { key: "manganese", name: tr("Mangan"), unit: "mg", rdi: 2, blurb: tr("Stöttar benbildning och ämnesomsättning.") },
+  { key: "iodine", name: tr("Jod"), unit: "µg", rdi: 150, blurb: tr("Behövs för att bilda sköldkörtelhormoner.") },
+  { key: "sodium", name: tr("Natrium"), unit: "mg", rdi: 2400, blurb: tr("Reglerar vätskebalans och nervsignaler, men lätt att få i överflöd.") },
+  { key: "chloride", name: tr("Klorid"), unit: "mg", rdi: 2300, blurb: tr("Hjälper till att reglera vätskebalans och bildar magsyra. Räknas ut från natriumet, eftersom nästan all klorid kommer från salt och sällan mäts separat.") },
+  { key: "chromium", name: tr("Krom"), unit: "µg", rdi: 40, blurb: tr("Kan stötta insulinets funktion och blodsockerreglering.") },
+  { key: "molybdenum", name: tr("Molybden"), unit: "µg", rdi: 50, blurb: tr("Behövs som kofaktor i flera viktiga enzymer.") },
+  { key: "fluoride", name: tr("Fluorid"), unit: "mg", rdi: 3, blurb: tr("Stärker tandemaljen och motverkar karies.") },
+  { key: "sulfur", name: tr("Svavel"), unit: "mg", rdi: 900, blurb: tr("Ingår i aminosyror och behövs för protein- och bindvävsuppbyggnad. Räknas ut från proteinet, eftersom svavlet kommer från proteinets aminosyror.") },
 ];
 const MICRO_KEYS = [...VITAMINS, ...MINERALS].map((m) => m.key);
 
 const HEALTH_CATEGORIES = [
-  { key: "energi", label: "Energi", emoji: "⚡", color: "#F2C063",
-    blurb: "Baserat på järn, B-vitaminer och kolhydrater mot ditt dagsmål.",
+  { key: "energi", label: tr("Energi"), emoji: "⚡", color: "#F2C063",
+    blurb: tr("Baserat på järn, B-vitaminer och kolhydrater mot ditt dagsmål."),
     factors: [{ t: "mineral", k: "iron" }, { t: "vitamin", k: "b1" }, { t: "vitamin", k: "b2" }, { t: "vitamin", k: "b3" }, { t: "vitamin", k: "b12" }, { t: "macro", k: "carbs_g" }] },
-  { key: "maende", label: "Mående", emoji: "😊", color: "#8FD9A8",
-    blurb: "Baserat på D-vitamin, B6, folat och magnesium.",
+  { key: "maende", label: tr("Mående"), emoji: "😊", color: "#8FD9A8",
+    blurb: tr("Baserat på D-vitamin, B6, folat och magnesium."),
     factors: [{ t: "vitamin", k: "vit_d" }, { t: "vitamin", k: "b6" }, { t: "vitamin", k: "b9" }, { t: "mineral", k: "magnesium" }] },
-  { key: "somn", label: "Sömn", emoji: "😴", color: "#7FA8D9",
-    blurb: "Baserat på magnesium, kalcium och B6.",
+  { key: "somn", label: tr("Sömn"), emoji: "😴", color: "#7FA8D9",
+    blurb: tr("Baserat på magnesium, kalcium och B6."),
     factors: [{ t: "mineral", k: "magnesium" }, { t: "mineral", k: "calcium" }, { t: "vitamin", k: "b6" }] },
-  { key: "hjarna", label: "Hjärna & fokus", emoji: "🧠", color: "#C08FE0",
-    blurb: "Baserat på B12, järn, D-vitamin, zink och kolin.",
+  { key: "hjarna", label: tr("Hjärna & fokus"), emoji: "🧠", color: "#C08FE0",
+    blurb: tr("Baserat på B12, järn, D-vitamin, zink och kolin."),
     factors: [{ t: "vitamin", k: "b12" }, { t: "mineral", k: "iron" }, { t: "vitamin", k: "vit_d" }, { t: "mineral", k: "zinc" }, { t: "vitamin", k: "choline" }] },
-  { key: "immun", label: "Immunförsvar", emoji: "🛡️", color: "#6FD1D9",
-    blurb: "Baserat på C-vitamin, zink, D-vitamin och protein.",
+  { key: "immun", label: tr("Immunförsvar"), emoji: "🛡️", color: "#6FD1D9",
+    blurb: tr("Baserat på C-vitamin, zink, D-vitamin och protein."),
     factors: [{ t: "vitamin", k: "vit_c" }, { t: "mineral", k: "zinc" }, { t: "vitamin", k: "vit_d" }, { t: "macro", k: "protein_g" }] },
-  { key: "hud", label: "Hud & hår", emoji: "✨", color: "#F2A9C0",
-    blurb: "Baserat på C-vitamin, E-vitamin, zink och biotin.",
+  { key: "hud", label: tr("Hud & hår"), emoji: "✨", color: "#F2A9C0",
+    blurb: tr("Baserat på C-vitamin, E-vitamin, zink och biotin."),
     factors: [{ t: "vitamin", k: "vit_c" }, { t: "vitamin", k: "vit_e" }, { t: "mineral", k: "zinc" }, { t: "vitamin", k: "b7" }] },
-  { key: "matsmaltning", label: "Matsmältning", emoji: "🌿", color: "#9ED97F",
-    blurb: "Baserat på fibrer mot ett dagsmål på ca 30g.",
+  { key: "matsmaltning", label: tr("Matsmältning"), emoji: "🌿", color: "#9ED97F",
+    blurb: tr("Baserat på fibrer mot ett dagsmål på ca 30g."),
     factors: [{ t: "fiber" }] },
-  { key: "hjarta", label: "Hjärta", emoji: "❤️", color: "#E08F8F",
-    blurb: "Baserat på kalium, magnesium, fibrer och lågt natriumintag.",
+  { key: "hjarta", label: tr("Hjärta"), emoji: "❤️", color: "#E08F8F",
+    blurb: tr("Baserat på kalium, magnesium, fibrer och lågt natriumintag."),
     factors: [{ t: "mineral", k: "potassium" }, { t: "mineral", k: "magnesium" }, { t: "fiber" }, { t: "mineral", k: "sodium", inverse: true }] },
-  { key: "hormon", label: "Hormonbalans", emoji: "⚖️", color: "#D9B36F",
-    blurb: "Baserat på zink, D-vitamin, magnesium och sunt fettintag — visar näringsstöd, inte faktiska hormonnivåer.",
+  { key: "hormon", label: tr("Hormonbalans"), emoji: "⚖️", color: "#D9B36F",
+    blurb: tr("Baserat på zink, D-vitamin, magnesium och sunt fettintag — visar näringsstöd, inte faktiska hormonnivåer."),
     factors: [{ t: "mineral", k: "zinc" }, { t: "vitamin", k: "vit_d" }, { t: "mineral", k: "magnesium" }, { t: "macro", k: "fat_g" }] },
-  { key: "muskler", label: "Muskler", emoji: "💪", color: "#E0A05C",
-    blurb: "Baserat på protein mot ditt mål, magnesium och zink.",
+  { key: "muskler", label: tr("Muskler"), emoji: "💪", color: "#E0A05C",
+    blurb: tr("Baserat på protein mot ditt mål, magnesium och zink."),
     factors: [{ t: "macro", k: "protein_g" }, { t: "mineral", k: "magnesium" }, { t: "mineral", k: "zinc" }] },
 ];
 
@@ -329,7 +818,7 @@ async function callClaude(messages, system, maxTokens = 600) {
     body: JSON.stringify({ max_tokens: maxTokens, system, messages }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((typeof data.error === "string" ? data.error : data.error?.message) || "AI:n svarade inte.");
+  if (!res.ok) throw new Error((typeof data.error === "string" ? data.error : data.error?.message) || tr("AI:n svarade inte."));
   const textBlock = (data.content || []).find((b) => b.type === "text");
   return textBlock ? textBlock.text : "";
 }
@@ -355,9 +844,13 @@ async function aiInterpret(text) {
     const system =
       "Du tolkar vad en användare har ätit, för en matloggningsapp. Svara ENDAST med JSON, ingen annan text: " +
       '{"name": string, "amount": number, "unit": "g"|"ml"|"dl"|"msk"|"tsk"|"kopp"|"st", "alternatives": [string]} ' +
-      "name: ett enkelt sökord för livsmedlet på svenska, som det kan heta i en livsmedelsdatabas (t.ex. \"mjölk\", \"spaghetti kokt\", \"kycklingfilé\"). " +
+      (LANG === "sv"
+        ? "name: ett enkelt sökord för livsmedlet på svenska, som det kan heta i en livsmedelsdatabas (t.ex. \"mjölk\", \"spaghetti kokt\", \"kycklingfilé\"). "
+        : "name: ett enkelt sökord för livsmedlet på ENGELSKA, som det kan heta i en livsmedelsdatabas (t.ex. \"milk\", \"spaghetti cooked\", \"chicken breast\"). ") +
       "amount/unit: mängden användaren angav. Saknas mängd, gissa en vanlig portion i gram (unit \"g\"). Ett glas ≈ 2 dl. " +
-      "alternatives: 0–3 andra sökord (t.ex. engelska namnet eller ett bredare ord). Hitta aldrig på näringsvärden.";
+      (LANG === "sv"
+        ? "alternatives: 0–3 andra sökord (t.ex. engelska namnet eller ett bredare ord). Hitta aldrig på näringsvärden."
+        : "alternatives: 0–3 andra sökord (t.ex. det svenska namnet eller ett bredare ord). Hitta aldrig på näringsvärden.");
     const parsed = parseJsonLoose(await callClaude([{ role: "user", content: text }], system, 200));
     const unit = UNIT_MAP[parsed.unit] || "g";
     const amount = Number(parsed.amount);
@@ -407,11 +900,11 @@ async function aiPhotoItems(photoData, description) {
   const system =
     "Du ser en bild av en måltid. Lista de livsmedel som syns och uppskatta vikten i gram för varje del. Svara ENDAST med JSON: " +
     '{"items": [{"name": string, "grams": number}]} ' +
-    "name: enkelt sökord på svenska som det kan heta i en livsmedelsdatabas, med tillagningssätt om det syns (t.ex. \"ris kokt\", \"kycklingfilé stekt\", \"broccoli kokt\"). " +
+    (LANG === "sv" ? "name: enkelt sökord på svenska" : "name: enkelt sökord på ENGELSKA") + " som det kan heta i en livsmedelsdatabas, med tillagningssätt om det syns (t.ex. \"ris kokt\", \"kycklingfilé stekt\", \"broccoli kokt\"). " +
     "Högst 8 delar. Ta med såser och dressing om de syns. Hitta aldrig på näringsvärden.";
   const content = [
     { type: "image", source: { type: "base64", media_type: photoData.mime, data: photoData.b64 } },
-    { type: "text", text: description ? `Användarens beskrivning: ${description}` : "Ingen beskrivning." },
+    { type: "text", text: description ? trf("Användarens beskrivning: {0}", description) : tr("Ingen beskrivning.") },
   ];
   const parsed = parseJsonLoose(await callClaude([{ role: "user", content }], system, 500));
   return (parsed.items || [])
@@ -467,7 +960,7 @@ function NutrientRow({ label, value, unit, estimated, onChange, sub }) {
               background: C.estimateDim, padding: "2px 6px", borderRadius: 4,
             }}
           >
-            uppskattat
+            {tr("uppskattat")}
           </span>
         )}
       </div>
@@ -491,20 +984,20 @@ function NutrientRow({ label, value, unit, estimated, onChange, sub }) {
 }
 
 const UNITS = [
-  { v: "g", l: "gram" },
-  { v: "ml", l: "ml" },
-  { v: "dl", l: "dl" },
-  { v: "msk", l: "msk" },
-  { v: "tsk", l: "tsk" },
-  { v: "kopp", l: "kopp" },
-  { v: "st", l: "styck" },
+  { v: "g", l: tr("gram") },
+  { v: "ml", l: tr("ml") },
+  { v: "dl", l: tr("dl") },
+  { v: "msk", l: tr("msk") },
+  { v: "tsk", l: tr("tsk") },
+  { v: "kopp", l: tr("kopp") },
+  { v: "st", l: tr("styck") },
 ];
 const UNIT_LABELS = Object.fromEntries(UNITS.map((u) => [u.v, u.l]));
 const FALLBACK_UNIT_GRAMS = { g: 1, ml: 1, dl: 100, msk: 15, tsk: 5, kopp: 240, st: 100 };
 
 // ---------- "150 g ris", "2 kiwi", "ris 150g" → namn + mängd + enhet ----------
-const UNIT_WORDS = "kg|gram|gr|g|ml|cl|dl|l|msk|tsk|koppar|kopp|stycken|styck|st";
-const UNIT_MAP = { g: "g", gr: "g", gram: "g", kg: "kg", ml: "ml", cl: "cl", dl: "dl", l: "l", msk: "msk", tsk: "tsk", kopp: "kopp", koppar: "kopp", st: "st", styck: "st", stycken: "st" };
+const UNIT_WORDS = "kg|grams|gram|gr|g|ml|cl|dl|l|msk|tsk|tbsp|tsp|koppar|kopp|cups|cup|stycken|styck|st|pieces|piece|pcs|pc|oz";
+const UNIT_MAP = { g: "g", gr: "g", gram: "g", grams: "g", kg: "kg", ml: "ml", cl: "cl", dl: "dl", l: "l", msk: "msk", tsk: "tsk", tbsp: "msk", tsp: "tsk", kopp: "kopp", koppar: "kopp", cup: "kopp", cups: "kopp", st: "st", styck: "st", stycken: "st", piece: "st", pieces: "st", pc: "st", pcs: "st", oz: "oz" };
 
 function parseFoodInput(text) {
   const t = text.trim().toLowerCase().replace(/(\d),(\d)/g, "$1.$2");
@@ -521,6 +1014,7 @@ function parseFoodInput(text) {
   if (u === "kg") { n *= 1000; u = "g"; }
   if (u === "l") { n *= 1000; u = "ml"; }
   if (u === "cl") { n *= 10; u = "ml"; }
+  if (u === "oz") { n = Math.round(n * 28.35); u = "g"; }
   name = name.trim();
   if (!name || !n) return null;
   return { name, amount: n, unit: u };
@@ -528,6 +1022,12 @@ function parseFoodInput(text) {
 
 // ungefärlig vikt för "1 st" av vanliga livsmedel (gram). Längre ord först så att t.ex. "körsbärstomat" går före "tomat".
 const PIECE_GRAMS = [
+  // engelska först (längre ord före kortare, t.ex. "cherry tomato" före "tomat")
+  ["cherry tomato", 15], ["sweet potato", 200], ["garlic clove", 5], ["slice of bread", 35], ["chicken breast", 130],
+  ["pineapple", 900], ["tangerine", 70], ["clementine", 70], ["nectarine", 140], ["peach", 150], ["plum", 60],
+  ["orange", 150], ["avocado", 150], ["bell pepper", 150], ["potato", 100], ["rice cake", 8], ["strawberr", 12],
+  ["banana", 120], ["apple", 150], ["pear", 170], ["tomato", 90], ["carrot", 70], ["lemon", 100], ["cucumber", 350],
+  ["fig", 50], ["onion", 100], ["egg", 60], ["cookie", 10], ["biscuit", 10],
   ["körsbärstomat", 15], ["sötpotatis", 200], ["vitlöksklyfta", 5], ["knäckebröd", 12], ["brödskiva", 35],
   ["skiva bröd", 35], ["kycklingfilé", 130], ["mandarin", 70], ["clementin", 70], ["nektarin", 140],
   ["persik", 150], ["plommon", 60], ["apelsin", 150], ["avokado", 150], ["paprik", 150], ["potatis", 100],
@@ -542,6 +1042,16 @@ function pieceGrams(name) {
 
 // vardagliga mått utan siffror: "ett glas mjölk" → 2 dl mjölk. Används när AI inte är tillgänglig.
 const VAGUE_UNITS = [
+  [/^(?:a|one|1)\s+(?:big\s+|large\s+)?glass\s+(?:of\s+)?/, 2, "dl"],
+  [/^(?:a|one|1)\s+(?:big\s+|large\s+)?cup\s+(?:of\s+)?/, 1, "kopp"],
+  [/^(?:a|one|1)\s+mug\s+(?:of\s+)?/, 2.5, "dl"],
+  [/^(?:a|one|1)\s+(?:small\s+)?bowl\s+(?:of\s+)?/, 250, "g"],
+  [/^(?:a|one|1)\s+plate\s+(?:of\s+)?/, 350, "g"],
+  [/^(?:a|one|1)\s+(?:portion|serving)\s+(?:of\s+)?/, 300, "g"],
+  [/^(?:a|one|1)\s+tablespoon\s+(?:of\s+)?/, 1, "msk"],
+  [/^(?:a|one|1)\s+teaspoon\s+(?:of\s+)?/, 1, "tsk"],
+  [/^(?:a|one|1)\s+handful\s+(?:of\s+)?/, 30, "g"],
+  [/^(?:a|one|1)\s+(?:slice|piece)\s+(?:of\s+)?/, 30, "g"],
   [/^(?:ett|1)\s+(?:stort\s+)?glas\s+/, 2, "dl"],
   [/^(?:en|1)\s+(?:stor\s+)?kopp\s+/, 1, "kopp"],
   [/^(?:en|1)\s+mugg\s+/, 2.5, "dl"],
@@ -583,14 +1093,14 @@ async function loadChoices(session, query) {
 }
 
 // hämtar sparade val färskt från vår livsmedelstabell via id, så att gamla kopior aldrig används
-const FOOD_SOURCE_LABELS = { slv: "Livsmedelsverkets livsmedelsdatabas", usda: "USDA FoodData Central" };
+const FOOD_SOURCE_LABELS = { slv: tr("Livsmedelsverkets livsmedelsdatabas"), usda: "USDA FoodData Central" };
 function foodRowToCandidate(r) {
   const extra = r.extra_micros && Object.keys(r.extra_micros).length ? r.extra_micros : null;
   const micros = { ...(extra || {}), ...(r.micros || {}) };
   return {
     id: r.id,
-    source: (FOOD_SOURCE_LABELS[r.source] || r.source) + (extra ? ", kompletterat med USDA FoodData Central" : ""),
-    name: r.name_sv || r.name_en,
+    source: (FOOD_SOURCE_LABELS[r.source] || r.source) + (extra ? tr(", kompletterat med USDA FoodData Central") : ""),
+    name: (LANG === "en" ? r.name_en || r.name_sv : r.name_sv || r.name_en),
     per100: {
       kcal: Number(r.kcal) || 0, protein_g: Number(r.protein_g) || 0, carbs_g: Number(r.carbs_g) || 0,
       sugar_g: Number(r.sugar_g) || 0, fiber_g: Number(r.fiber_g) || 0, fat_g: Number(r.fat_g) || 0,
@@ -634,7 +1144,7 @@ async function lookupBarcode(code) {
     const res = await fetch("/api/food-lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ barcode: code }),
+      body: JSON.stringify({ barcode: code, lang: LANG }),
     });
     const data = await res.json();
     return data.product || null;
@@ -648,7 +1158,7 @@ async function lookupFoodDatabase(name, country) {
     const res = await fetch("/api/food-lookup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: name, country: country && country !== "OTHER" ? country : null }),
+      body: JSON.stringify({ query: name, country: country && country !== "OTHER" ? country : null, lang: LANG }),
     });
     return await res.json();
   } catch (e) {
@@ -745,7 +1255,7 @@ export default function DotApp() {
       window.history.replaceState(null, "", window.location.pathname); // städa bort dem ur adressfältet
     }
     if (hash.get("error")) {
-      setAuthError("Google-inloggningen misslyckades: " + (hash.get("error_description") || hash.get("error")));
+      setAuthError(tr("Google-inloggningen misslyckades: ") + (hash.get("error_description") || hash.get("error")));
     }
     if (hash.get("access_token")) {
       (async () => {
@@ -761,7 +1271,7 @@ export default function DotApp() {
           }));
         } catch (e) {
           console.error("Google-inloggningen misslyckades:", e.message);
-          setAuthError("Google-inloggningen misslyckades: " + e.message);
+          setAuthError(tr("Google-inloggningen misslyckades: ") + e.message);
         } finally {
           setRestoring(false);
         }
@@ -802,7 +1312,7 @@ export default function DotApp() {
         if (!cancelled) setSession(fresh);
       } catch (e) {
         console.error("Kunde inte förnya inloggningen:", e.message);
-        if (!cancelled) setSyncError("Din inloggning har gått ut — logga ut och in igen.");
+        if (!cancelled) setSyncError(tr("Din inloggning har gått ut — logga ut och in igen."));
       }
     }
 
@@ -888,7 +1398,7 @@ export default function DotApp() {
         await loadUserData(data.access_token, data.user.id); // clears any leftover demo data — new account starts empty
         setPage("profile");
       } else {
-        setAuthError("Kolla din mail för att bekräfta ditt konto, logga sedan in.");
+        setAuthError(tr("Kolla din mail för att bekräfta ditt konto, logga sedan in."));
         setPage("login");
       }
     } catch (e) {
@@ -999,7 +1509,7 @@ export default function DotApp() {
           target_protein_g: protein_g, target_carbs_g: finalCarbs, target_fat_g: fat_g,
           units_weight: units.weight, units_height: units.height, country: profileInfo.country || null,
         },
-      }).catch((e) => { console.error("Kunde inte spara profilen:", e.message); setSyncError("Kunde inte spara profilen: " + e.message); });
+      }).catch((e) => { console.error("Kunde inte spara profilen:", e.message); setSyncError(tr("Kunde inte spara profilen: ") + e.message); });
     }
     setPage(nextPage);
   }
@@ -1040,14 +1550,14 @@ export default function DotApp() {
           [todayKey]: (logs[todayKey] || []).map((e) => (e.tmpId === tmpId ? { ...e, id: row.id } : e)),
         }));
       })
-      .catch((e) => { console.error("Kunde inte spara loggningen:", e.message); setSyncError("Kunde inte spara till databasen: " + e.message); });
+      .catch((e) => { console.error("Kunde inte spara loggningen:", e.message); setSyncError(tr("Kunde inte spara till databasen: ") + e.message); });
   }
   const sameEntry = (a, b) => (a.id && a.id === b.id) || (a.tmpId && a.tmpId === b.tmpId);
   function removeLogEntry(dayKey, entry) {
     setDayFoodLogs((logs) => ({ ...logs, [dayKey]: (logs[dayKey] || []).filter((e) => !sameEntry(e, entry)) }));
     if (session && entry.id) {
       supabaseRest("daily_logs", { method: "DELETE", accessToken: session.access_token, params: { id: `eq.${entry.id}` } })
-        .catch((e) => { console.error("Kunde inte ta bort:", e.message); setSyncError("Kunde inte ta bort från databasen: " + e.message); });
+        .catch((e) => { console.error("Kunde inte ta bort:", e.message); setSyncError(tr("Kunde inte ta bort från databasen: ") + e.message); });
     }
   }
   function scaleLogEntry(dayKey, entry, factor, newGrams, newAmount, newUnit) {
@@ -1063,7 +1573,7 @@ export default function DotApp() {
     setDayFoodLogs((logs) => ({ ...logs, [dayKey]: (logs[dayKey] || []).map((e) => (sameEntry(e, entry) ? scaled : e)) }));
     if (session && entry.id) {
       supabaseRest("daily_logs", { method: "PATCH", accessToken: session.access_token, params: { id: `eq.${entry.id}` }, body: logBody(scaled) })
-        .catch((e) => { console.error("Kunde inte ändra:", e.message); setSyncError("Kunde inte spara ändringen: " + e.message); });
+        .catch((e) => { console.error("Kunde inte ändra:", e.message); setSyncError(tr("Kunde inte spara ändringen: ") + e.message); });
     }
   }
 
@@ -1085,7 +1595,7 @@ export default function DotApp() {
   function relog(e) {
     const { id, tmpId, ...rest } = e;
     addLogEntry(rest);
-    setJustLogged(e.name || "Måltid");
+    setJustLogged(e.name || tr("Måltid"));
     reset();
   }
 
@@ -1104,7 +1614,7 @@ export default function DotApp() {
     if (!product) {
       setScanned(null);
       setMode("manual");
-      setError(`Produkten (${code}) finns inte i databasen än. Sök på namnet i stället, eller fyll i värdena från förpackningen här nedanför.`);
+      setError(trf("Produkten ({0}) finns inte i databasen än. Sök på namnet i stället, eller fyll i värdena från förpackningen här nedanför.", code));
       return;
     }
     setScanned(product);
@@ -1117,7 +1627,7 @@ export default function DotApp() {
 
   async function estimateManual() {
     if (scanned && foodName.trim() === scanned.name) {
-      if (!weight.trim()) { setError("Skriv hur många gram du åt."); return; }
+      if (!weight.trim()) { setError(tr("Skriv hur många gram du åt.")); return; }
       await finishManual(scanned, { name: scanned.name, amount: weight.trim(), unit: weightUnit });
       return;
     }
@@ -1153,7 +1663,7 @@ export default function DotApp() {
         if (!pg) {
           setFoodName(name); setWeight(""); setWeightUnit("g");
           setMode("manual");
-          setError(`Jag vet inte hur mycket en "${name}" väger ungefär — skriv mängden i gram i fältet här nedanför.`);
+          setError(trf("Jag vet inte hur mycket en \"{0}\" väger ungefär — skriv mängden i gram i fältet här nedanför.", name));
           return;
         }
         amount = String(Math.round(parsed.amount * pg));
@@ -1172,7 +1682,7 @@ export default function DotApp() {
     if (!amount) {
       setFoodName(name);
       setMode("manual");
-      setError('Hur mycket? Fyll i mängden här nedanför — eller skriv den direkt, t.ex. "150 g ris" eller "2 kiwi".');
+      setError(tr("Hur mycket? Fyll i mängden här nedanför — eller skriv den direkt, t.ex. \"150 g ris\" eller \"2 kiwi\"."));
       return;
     }
 
@@ -1209,7 +1719,7 @@ export default function DotApp() {
         const shorter = await lookupFoodDatabase(q, profileInfo.country);
         if ((shorter.results || []).length) {
           merged = shorter.results;
-          setSearchNote(`Inga träffar för "${name}" — visar träffar för "${q}".`);
+          setSearchNote(trf("Inga träffar för \"{0}\" — visar träffar för \"{1}\".", name, q));
           break;
         }
       }
@@ -1224,7 +1734,7 @@ export default function DotApp() {
         const alt = await lookupFoodDatabase(q, profileInfo.country);
         if ((alt.results || []).length) {
           merged = alt.results;
-          setSearchNote(`Inga träffar för "${name}" — visar träffar för "${q}".`);
+          setSearchNote(trf("Inga träffar för \"{0}\" — visar träffar för \"{1}\".", name, q));
           break;
         }
       }
@@ -1249,7 +1759,7 @@ export default function DotApp() {
     const res = await estimateFoodValues(name, amount, unit, known100, hit);
     setLoading(false);
     if (res.notFound) {
-      setError(`Hittade inte "${name}" i databasen. Kolla stavningen, prova ett annat ord eller engelska (t.ex. "chicken breast") — eller fyll i värdena från förpackningen här nedanför.`);
+      setError(trf("Hittade inte \"{0}\" i databasen. Kolla stavningen, prova ett annat ord eller engelska (t.ex. \"chicken breast\") — eller fyll i värdena från förpackningen här nedanför.", name));
       setShow100(true);
       setMode("manual");
       return;
@@ -1257,7 +1767,7 @@ export default function DotApp() {
     if (hit) saveChoice(session, normalizeQuery(name), hit);
     setResult(res);
     setMode("result");
-    if (res.microsMissing) setError("Vitaminer och mineraler finns inte uppmätta för den här träffen, så de räknas inte med.");
+    if (res.microsMissing) setError(tr("Vitaminer och mineraler finns inte uppmätta för den här träffen, så de räknas inte med."));
   }
 
   // "Byt träff": visa alla träffar igen — söker på nytt om listan inte finns kvar
@@ -1269,7 +1779,7 @@ export default function DotApp() {
     setLoading(false);
     const list = lookup.results || [];
     if (list.length) { setCandidates(list); setOwnValuesPick(false); setMode("pick"); }
-    else setError(`Hittade inga andra träffar för "${foodName}". Prova att söka med ett annat ord.`);
+    else setError(trf("Hittade inga andra träffar för \"{0}\". Prova att söka med ett annat ord.", foodName));
   }
 
   // foto: AI ser VAD som ligger på tallriken och ungefär hur mycket — värdena hämtas från databasen
@@ -1281,10 +1791,10 @@ export default function DotApp() {
       items = await aiPhotoItems(photoData, photoDesc.trim());
     } catch (e) {
       setLoading(false);
-      setError(/inte aktiverad/i.test(e.message) ? "Bildloggning kräver AI, som inte är aktiverad än. Logga manuellt så länge." : "Kunde inte tolka bilden: " + e.message);
+      setError(/inte aktiverad/i.test(e.message) ? tr("Bildloggning kräver AI, som inte är aktiverad än. Logga manuellt så länge.") : tr("Kunde inte tolka bilden: ") + e.message);
       return;
     }
-    if (!items.length) { setLoading(false); setError("Hittade ingen mat på bilden. Prova en annan bild eller lägg till en beskrivning."); return; }
+    if (!items.length) { setLoading(false); setError(tr("Hittade ingen mat på bilden. Prova en annan bild eller lägg till en beskrivning.")); return; }
     const found = [];
     const missing = [];
     for (const it of items) {
@@ -1297,7 +1807,7 @@ export default function DotApp() {
       found.push({ key: `${it.name}-${found.length}`, name: it.name, grams: it.grams, res });
     }
     setLoading(false);
-    if (!found.length) { setError(`Hittade inte ${missing.join(", ")} i databasen. Logga manuellt i stället.`); return; }
+    if (!found.length) { setError(trf("Hittade inte {0} i databasen. Logga manuellt i stället.", missing.join(", "))); return; }
     setPhotoItems(found);
     setPhotoMissing(missing);
     setConfirmed(false);
@@ -1335,13 +1845,13 @@ export default function DotApp() {
         `Du är en kort, konkret hjälpreda inne i en matloggningsapp. Användaren loggar just nu ` +
         `"${foodName}" (${weight || "okänd"} ${UNIT_LABELS[weightUnit] || "g"}) med dessa värden från livsmedelsdatabasen: ` +
         `${JSON.stringify({ kcal: result.kcal, protein_g: result.protein_g, carbs_g: result.carbs_g, fat_g: result.fat_g, fiber_g: result.fiber_g, gram: result.estimatedGrams, källa: result.source, träff: result.matchedName })}. ` +
-        `Svara kort (max 3 meningar) på svenska. Hitta aldrig på egna näringsvärden — utgå från siffrorna ovan. ` +
+        `Svara kort (max 3 meningar) på ${LANG === "sv" ? "svenska" : "engelska"}. Hitta aldrig på egna näringsvärden — utgå från siffrorna ovan. ` +
         `Neutral ton: informera, moralisera inte. Håll dig till bred forskningskonsensus.`;
       const apiMsgs = nextMsgs.map((m) => ({ role: m.role, content: m.text }));
       const text = await callClaude(apiMsgs, system);
-      setChatMsgs((m) => [...m, { role: "assistant", text: text || "Kunde inte svara just nu." }]);
+      setChatMsgs((m) => [...m, { role: "assistant", text: text || tr("Kunde inte svara just nu.") }]);
     } catch (e) {
-      setChatMsgs((m) => [...m, { role: "assistant", text: /inte aktiverad/i.test(e.message) ? "AI är inte aktiverad än." : "Kunde inte nå AI:n just nu." }]);
+      setChatMsgs((m) => [...m, { role: "assistant", text: /inte aktiverad/i.test(e.message) ? tr("AI är inte aktiverad än.") : tr("Kunde inte nå AI:n just nu.") }]);
     } finally {
       setChatLoading(false);
     }
@@ -1353,7 +1863,7 @@ export default function DotApp() {
   if (restoring) {
     return (
       <div style={{ minHeight: "100vh", background: C.bgGradient, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        <style>{tr("@keyframes spin { to { transform: rotate(360deg) } }")}</style>
         <Loader2 size={24} color={C.accent} style={{ animation: "spin 1s linear infinite" }} />
       </div>
     );
@@ -1388,50 +1898,50 @@ export default function DotApp() {
             {page === "login" && (
               <>
                 <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 4, textAlign: "center" }}>
-                  Välkommen
+                  {tr("Välkommen")}
                 </p>
                 <p style={{ fontSize: 12.5, color: C.textDim, marginBottom: 30, textAlign: "center" }}>
-                  Discipline Over Time.
+                  {tr("Discipline Over Time.")}
                 </p>
 
                 <button onClick={startGoogleLogin} style={socialBtn}>
-                  <GoogleIcon /> Fortsätt med Google
+                  <GoogleIcon /> {tr("Fortsätt med Google")}
                 </button>
                 <p style={{ fontSize: 10.5, color: C.textFaint, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
-                  Är du ny godkänner du att DOT sparar dina kost- och hälsouppgifter enligt{" "}
-                  <a href="/integritet.html" target="_blank" rel="noopener noreferrer" style={{ color: C.accent }}>integritetspolicyn</a> (16 år eller äldre).
+                  {tr("Är du ny godkänner du att DOT sparar dina kost- och hälsouppgifter enligt")}{" "}
+                  <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" style={{ color: C.accent }}>{tr("integritetspolicyn")}</a> {tr("(16 år eller äldre).")}
                 </p>
                 <button disabled style={{ ...socialBtn, marginTop: 10, opacity: 0.45, cursor: "default" }}>
-                  <AppleIcon /> Apple — kommer snart
+                  <AppleIcon /> {tr("Apple — kommer snart")}
                 </button>
                 {authError && <p style={{ fontSize: 11.5, color: "#E08F8F", marginTop: 12, textAlign: "center" }}>{authError}</p>}
 
                 <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "20px 0" }}>
                   <div style={{ flex: 1, height: 1, background: C.border }} />
-                  <span style={{ fontSize: 11, color: C.textFaint }}>eller</span>
+                  <span style={{ fontSize: 11, color: C.textFaint }}>{tr("eller")}</span>
                   <div style={{ flex: 1, height: 1, background: C.border }} />
                 </div>
 
                 <button onClick={() => setPage("email-login")} style={{ ...ghostBtn, width: "100%", padding: "12px 0" }}>
-                  <Mail size={15} /> Fortsätt med mail
+                  <Mail size={15} /> {tr("Fortsätt med mail")}
                 </button>
 
                 <p style={{ fontSize: 12, color: C.textFaint, textAlign: "center", marginTop: 30 }}>
-                  Inget konto än? <span onClick={() => setPage("auth")} style={{ color: C.accent, cursor: "pointer" }}>Skapa konto</span>
+                  {tr("Inget konto än?")} <span onClick={() => setPage("auth")} style={{ color: C.accent, cursor: "pointer" }}>{tr("Skapa konto")}</span>
                 </p>
               </>
             )}
 
             {page === "email-login" && (
               <>
-                <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 4 }}>Logga in</p>
-                <p style={{ fontSize: 12.5, color: C.textDim, marginBottom: 26 }}>Med din e-post och ditt lösenord.</p>
-                <label style={onbLabel}>E-post</label>
+                <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 4 }}>{tr("Logga in")}</p>
+                <p style={{ fontSize: 12.5, color: C.textDim, marginBottom: 26 }}>{tr("Med din e-post och ditt lösenord.")}</p>
+                <label style={onbLabel}>{tr("E-post")}</label>
                 <input
                   value={authInfo.email} onChange={(e) => setAuthInfo((a) => ({ ...a, email: e.target.value }))}
-                  placeholder="du@exempel.se" style={onbInput}
+                  placeholder={tr("du@exempel.se")} style={onbInput}
                 />
-                <label style={onbLabel}>Lösenord</label>
+                <label style={onbLabel}>{tr("Lösenord")}</label>
                 <input
                   type="password" value={authInfo.password} onChange={(e) => setAuthInfo((a) => ({ ...a, password: e.target.value }))}
                   placeholder="••••••••" style={{ ...onbInput, marginBottom: 12 }}
@@ -1442,36 +1952,36 @@ export default function DotApp() {
                   disabled={!authInfo.email.trim() || !authInfo.password.trim() || authLoading}
                   style={{ ...primaryBtn, width: "100%", opacity: !authInfo.email.trim() || !authInfo.password.trim() ? 0.5 : 1, marginTop: 16 }}
                 >
-                  {authLoading ? "Loggar in…" : <>Logga in <ChevronRight size={15} /></>}
+                  {authLoading ? tr("Loggar in…") : <>{tr("Logga in")} <ChevronRight size={15} /></>}
                 </button>
                 <p onClick={() => { setPage("login"); setAuthError(""); }} style={{ fontSize: 11.5, color: C.textFaint, textAlign: "center", marginTop: 14, cursor: "pointer" }}>
-                  ← Tillbaka
+                  {tr("← Tillbaka")}
                 </p>
               </>
             )}
 
             {page === "auth" && (
               <>
-                <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 4 }}>Skapa konto</p>
+                <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 4 }}>{tr("Skapa konto")}</p>
                 <p style={{ fontSize: 12.5, color: C.textDim, marginBottom: 26 }}>
-                  Discipline Over Time.
+                  {tr("Discipline Over Time.")}
                 </p>
-                <label style={onbLabel}>E-post</label>
+                <label style={onbLabel}>{tr("E-post")}</label>
                 <input
                   value={authInfo.email} onChange={(e) => setAuthInfo((a) => ({ ...a, email: e.target.value }))}
-                  placeholder="du@exempel.se" style={onbInput}
+                  placeholder={tr("du@exempel.se")} style={onbInput}
                 />
-                <label style={onbLabel}>Lösenord</label>
+                <label style={onbLabel}>{tr("Lösenord")}</label>
                 <input
                   type="password" value={authInfo.password} onChange={(e) => setAuthInfo((a) => ({ ...a, password: e.target.value }))}
-                  placeholder="•••••••• (minst 6 tecken)" style={{ ...onbInput, marginBottom: 12 }}
+                  placeholder={tr("•••••••• (minst 6 tecken)")} style={{ ...onbInput, marginBottom: 12 }}
                 />
                 <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: C.textDim, lineHeight: 1.5, cursor: "pointer", marginTop: 4 }}>
                   <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)}
                     style={{ marginTop: 3, accentColor: C.accent, width: 16, height: 16, flexShrink: 0 }} />
                   <span>
-                    Jag är minst 16 år och godkänner att DOT sparar mina kost- och hälsouppgifter enligt{" "}
-                    <a href="/integritet.html" target="_blank" rel="noopener noreferrer" style={{ color: C.accent }}>integritetspolicyn</a>.
+                    {tr("Jag är minst 16 år och godkänner att DOT sparar mina kost- och hälsouppgifter enligt")}{" "}
+                    <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer" style={{ color: C.accent }}>{tr("integritetspolicyn")}</a>.
                   </span>
                 </label>
                 {authError && <p style={{ fontSize: 11.5, color: "#E08F8F", marginTop: 12, marginBottom: 0 }}>{authError}</p>}
@@ -1480,10 +1990,10 @@ export default function DotApp() {
                   disabled={!authInfo.email.trim() || !authInfo.password.trim() || !consent || authLoading}
                   style={{ ...primaryBtn, width: "100%", opacity: !authInfo.email.trim() || !authInfo.password.trim() || !consent ? 0.5 : 1, marginTop: 16 }}
                 >
-                  {authLoading ? "Skapar konto…" : <>Skapa konto <ChevronRight size={15} /></>}
+                  {authLoading ? tr("Skapar konto…") : <>{tr("Skapa konto")} <ChevronRight size={15} /></>}
                 </button>
                 <p style={{ fontSize: 11.5, color: C.textFaint, textAlign: "center", marginTop: 14 }}>
-                  Har du redan ett konto? <span onClick={() => { setPage("login"); setAuthError(""); }} style={{ color: C.accent, cursor: "pointer" }}>Logga in</span>
+                  {tr("Har du redan ett konto?")} <span onClick={() => { setPage("login"); setAuthError(""); }} style={{ color: C.accent, cursor: "pointer" }}>{tr("Logga in")}</span>
                 </p>
               </>
             )}
@@ -1522,24 +2032,24 @@ export default function DotApp() {
                   <div className="fade-up" key={step} style={{ flex: 1, display: "flex", flexDirection: "column" }}>
                     {step === "country" && (
                       <>
-                        <p style={onbQ}>Var bor du?</p>
-                        <p style={onbSub}>Då visar vi livsmedel och varor från ditt land först när du loggar.</p>
+                        <p style={onbQ}>{tr("Var bor du?")}</p>
+                        <p style={onbSub}>{tr("Då visar vi livsmedel och varor från ditt land först när du loggar.")}</p>
                         <ChipGroup options={COUNTRIES} value={profileInfo.country}
                           onChange={(v) => setProfileInfo((p) => ({ ...p, country: v }))} large stack />
                       </>
                     )}
                     {step === "sex" && (
                       <>
-                        <p style={onbQ}>Vilket kön har du?</p>
-                        <p style={onbSub}>Hjälper oss räkna ut dina mål mer exakt.</p>
-                        <ChipGroup options={[{ v: "kvinna", l: "Kvinna" }, { v: "man", l: "Man" }]}
+                        <p style={onbQ}>{tr("Vilket kön har du?")}</p>
+                        <p style={onbSub}>{tr("Hjälper oss räkna ut dina mål mer exakt.")}</p>
+                        <ChipGroup options={[{ v: "kvinna", l: tr("Kvinna") }, { v: "man", l: tr("Man") }]}
                           value={profileInfo.sex} onChange={(v) => setProfileInfo((p) => ({ ...p, sex: v }))} large />
                       </>
                     )}
                     {step === "age" && (
                       <>
-                        <p style={onbQ}>Hur gammal är du?</p>
-                        <p style={onbSub}>Ålder påverkar din dagliga energiförbrukning.</p>
+                        <p style={onbQ}>{tr("Hur gammal är du?")}</p>
+                        <p style={onbSub}>{tr("Ålder påverkar din dagliga energiförbrukning.")}</p>
                         <input value={profileInfo.age} inputMode="numeric" autoFocus
                           onChange={(e) => setProfileInfo((p) => ({ ...p, age: e.target.value.replace(/[^0-9]/g, "") }))}
                           placeholder="28" style={onbInputBig} />
@@ -1547,8 +2057,8 @@ export default function DotApp() {
                     )}
                     {step === "height" && (
                       <>
-                        <p style={onbQ}>Hur lång är du?</p>
-                        <p style={onbSub}>{units.height === "ft" ? "I tum." : "I centimeter."}</p>
+                        <p style={onbQ}>{tr("Hur lång är du?")}</p>
+                        <p style={onbSub}>{units.height === "ft" ? tr("I tum.") : tr("I centimeter.")}</p>
                         <input value={displayHeight(profileInfo.height, units.height)} inputMode="numeric" autoFocus
                           onChange={(e) => setProfileInfo((p) => ({ ...p, height: parseHeightInput(e.target.value.replace(/[^0-9]/g, ""), units.height) }))}
                           placeholder={units.height === "ft" ? "70" : "178"} style={onbInputBig} />
@@ -1556,8 +2066,8 @@ export default function DotApp() {
                     )}
                     {step === "weight" && (
                       <>
-                        <p style={onbQ}>Hur mycket väger du?</p>
-                        <p style={onbSub}>{units.weight === "lbs" ? "I pund, ungefärligt räcker." : "I kilo, ungefärligt räcker."}</p>
+                        <p style={onbQ}>{tr("Hur mycket väger du?")}</p>
+                        <p style={onbSub}>{units.weight === "lbs" ? tr("I pund, ungefärligt räcker.") : tr("I kilo, ungefärligt räcker.")}</p>
                         <input value={displayWeight(profileInfo.weight, units.weight)} inputMode="numeric" autoFocus
                           onChange={(e) => setProfileInfo((p) => ({ ...p, weight: parseWeightInput(e.target.value.replace(/[^0-9.]/g, ""), units.weight) }))}
                           placeholder={units.weight === "lbs" ? "165" : "75"} style={onbInputBig} />
@@ -1565,8 +2075,8 @@ export default function DotApp() {
                     )}
                     {step === "activity" && (
                       <>
-                        <p style={onbQ}>Hur aktiv är du i vardagen?</p>
-                        <p style={onbSub}>Räknat utanför träningspass.</p>
+                        <p style={onbQ}>{tr("Hur aktiv är du i vardagen?")}</p>
+                        <p style={onbSub}>{tr("Räknat utanför träningspass.")}</p>
                         <ChipGroup
                           options={ACTIVITY_LEVELS}
                           value={profileInfo.activity} onChange={(v) => setProfileInfo((p) => ({ ...p, activity: v }))} large stack
@@ -1575,8 +2085,8 @@ export default function DotApp() {
                     )}
                     {step === "goal" && (
                       <>
-                        <p style={onbQ}>Vad vill du fokusera på?</p>
-                        <p style={onbSub}>Välj gärna flera — det här styr hur vi sätter dina mål, du kan ändra senare.</p>
+                        <p style={onbQ}>{tr("Vad vill du fokusera på?")}</p>
+                        <p style={onbSub}>{tr("Välj gärna flera — det här styr hur vi sätter dina mål, du kan ändra senare.")}</p>
                         <ChipGroup
                           options={GOALS} value={profileInfo.goal} multi
                           onChange={(v) => setProfileInfo((p) => ({
@@ -1590,7 +2100,7 @@ export default function DotApp() {
 
                     <div style={{ flex: 1 }} />
                     <button onClick={goNext} disabled={!stepValid} style={{ ...primaryBtn, width: "100%", opacity: stepValid ? 1 : 0.5 }}>
-                      {profileStep === STEPS.length - 1 ? "Räkna ut mina mål" : "Fortsätt"} <ChevronRight size={15} />
+                      {profileStep === STEPS.length - 1 ? tr("Räkna ut mina mål") : tr("Fortsätt")} <ChevronRight size={15} />
                     </button>
                   </div>
                 </>
@@ -1625,7 +2135,7 @@ export default function DotApp() {
             background: "rgba(255,255,255,0.04)", border: `1px solid rgba(255,255,255,0.06)`,
             borderRadius: 999, padding: "5px 11px",
           }}>
-            {Math.round(dailyLog.reduce((s, e) => s + (e.kcal || 0), 0))} / {targets.kcal} kcal
+            {Math.round(dailyLog.reduce((s, e) => s + (e.kcal || 0), 0))} / {targets.kcal} {tr("kcal")}
           </div>
           <button onClick={() => setPage("settings")} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex" }}>
             <Settings size={18} color={C.textFaint} />
@@ -1655,10 +2165,10 @@ export default function DotApp() {
                   headers: { Authorization: `Bearer ${session.access_token}` },
                 });
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.error || "Okänt fel");
+                if (!res.ok) throw new Error(data.error || tr("Okänt fel"));
               } catch (e) {
                 console.error("Kunde inte radera kontot:", e.message);
-                setSyncError("Kunde inte radera kontot: " + e.message + " Försök igen om en stund.");
+                setSyncError(tr("Kunde inte radera kontot: ") + e.message + tr(" Försök igen om en stund."));
                 return;
               }
             }
@@ -1738,13 +2248,13 @@ export default function DotApp() {
           };
           const kcalLeft = Math.max(0, targets.kcal - t.kcal);
           const hour = new Date().getHours();
-          const greeting = hour < 5 ? "God natt" : hour < 11 ? "God morgon" : hour < 17 ? "God eftermiddag" : "God kväll";
-          const dateStr = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
+          const greeting = hour < 5 ? tr("God natt") : hour < 11 ? tr("God morgon") : hour < 17 ? tr("God eftermiddag") : tr("God kväll");
+          const dateStr = new Date().toLocaleDateString(LOCALE, { weekday: "long", day: "numeric", month: "long" });
           return (
             <div className="fade-up" style={{ paddingBottom: 90 }}>
               {justLogged && (
                 <div className="fade-up" style={{ ...glass, borderRadius: 12, padding: "10px 14px", marginBottom: 16, fontSize: 12.5, color: C.accent, display: "flex", alignItems: "center", gap: 8 }}>
-                  <Check size={14} /> Loggat: {justLogged}
+                  <Check size={14} /> {tr("Loggat:")} {justLogged}
                 </div>
               )}
               <div style={{ marginBottom: 22 }}>
@@ -1755,42 +2265,42 @@ export default function DotApp() {
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 30 }}>
                 <Ring value={t.kcal} max={targets.kcal} size={184} stroke={12} color={C.ringKcal} trackColor="rgba(255,255,255,0.05)">
                   <span style={{ ...display, fontSize: 32, fontWeight: 700 }}>{Math.round(kcalLeft)}</span>
-                  <span style={{ fontSize: 12, color: C.textDim }}>kcal kvar</span>
+                  <span style={{ fontSize: 12, color: C.textDim }}>{tr("kcal kvar")}</span>
                 </Ring>
                 <div style={{ display: "flex", gap: 26, marginTop: 14 }}>
                   <div style={{ textAlign: "center" }}>
                     <div style={{ ...mono, fontSize: 15, fontWeight: 600 }}>{targets.kcal}</div>
-                    <div style={{ fontSize: 10.5, color: C.textFaint }}>Behov</div>
+                    <div style={{ fontSize: 10.5, color: C.textFaint }}>{tr("Behov")}</div>
                   </div>
                   <div style={{ width: 1, background: "rgba(255,255,255,0.08)" }} />
                   <div style={{ textAlign: "center" }}>
                     <div style={{ ...mono, fontSize: 15, fontWeight: 600 }}>{Math.round(t.kcal)}</div>
-                    <div style={{ fontSize: 10.5, color: C.textFaint }}>Ätit</div>
+                    <div style={{ fontSize: 10.5, color: C.textFaint }}>{tr("Ätit")}</div>
                   </div>
                 </div>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-around", marginBottom: 32 }}>
                 {[
-                  { label: "Protein", value: t.protein_g, max: targets.protein_g, color: C.ringProtein },
-                  { label: "Kolhydrater", value: t.carbs_g, max: targets.carbs_g, color: C.ringCarbs },
-                  { label: "Fett", value: t.fat_g, max: targets.fat_g, color: C.ringFat },
+                  { label: tr("Protein"), value: t.protein_g, max: targets.protein_g, color: C.ringProtein },
+                  { label: tr("Kolhydrater"), value: t.carbs_g, max: targets.carbs_g, color: C.ringCarbs },
+                  { label: tr("Fett"), value: t.fat_g, max: targets.fat_g, color: C.ringFat },
                 ].map((m) => (
                   <div key={m.label} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <Ring value={m.value} max={m.max} size={62} stroke={6} color={m.color} trackColor="rgba(255,255,255,0.05)">
                       <span style={{ ...mono, fontSize: 12.5, fontWeight: 600 }}>{Math.round(m.value)}</span>
                     </Ring>
-                    <span style={{ fontSize: 10.5, color: C.textFaint, marginTop: 8 }}>{m.label} · {m.max}g</span>
+                    <span style={{ fontSize: 10.5, color: C.textFaint, marginTop: 8 }}>{m.label} · {m.max}{tr("g")}</span>
                   </div>
                 ))}
               </div>
 
               <div>
                 <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  Dagens måltider
+                  {tr("Dagens måltider")}
                 </p>
                 {dailyLog.length === 0 ? (
-                  <p style={{ fontSize: 12.5, color: C.textFaint }}>Inget loggat än idag.</p>
+                  <p style={{ fontSize: 12.5, color: C.textFaint }}>{tr("Inget loggat än idag.")}</p>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {dailyLog.map((e, i) => (
@@ -1800,7 +2310,7 @@ export default function DotApp() {
                         onScale={(factor, newGrams, newAmount, newUnit) => scaleLogEntry(todayKey, e, factor, newGrams, newAmount, newUnit)}
                       />
                     ))}
-                    <p style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>Tryck på en rad för att ändra mängd eller ta bort.</p>
+                    <p style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>{tr("Tryck på en rad för att ändra mängd eller ta bort.")}</p>
                   </div>
                 )}
               </div>
@@ -1811,38 +2321,38 @@ export default function DotApp() {
         {/* log screen: search, scan, recent foods */}
         {mode === "choose" && (
           <div className="fade-up" style={{ maxWidth: 480, margin: "10px auto" }}>
-            <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 14 }}>Logga</p>
+            <p style={{ ...display, fontSize: 19, fontWeight: 600, marginBottom: 14 }}>{tr("Logga")}</p>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <input
                 autoFocus value={foodName}
                 onChange={(e) => setFoodName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && foodName.trim() && !loading && estimateManual()}
-                placeholder='t.ex. "150 g ris" eller "2 kiwi"'
+                placeholder={tr("t.ex. \"150 g ris\" eller \"2 kiwi\"")}
                 style={{ ...onbInput, flex: 1 }}
               />
               <button onClick={estimateManual} disabled={!foodName.trim() || loading} style={{ ...primaryBtn, opacity: foodName.trim() ? 1 : 0.5 }}>
-                {loading ? "Söker…" : "Sök"}
+                {loading ? tr("Söker…") : tr("Sök")}
               </button>
             </div>
             <button onClick={() => { setError(""); setMode("scan"); }} style={{ ...ghostBtn, width: "100%", marginBottom: 20 }}>
-              <BarcodeIcon size={16} /> Skanna streckkod
+              <BarcodeIcon size={16} /> {tr("Skanna streckkod")}
             </button>
             {error && <p style={{ fontSize: 12, color: C.estimate, marginTop: -8, marginBottom: 14 }}>{error}</p>}
 
             {recentFoods.length > 0 && (
               <>
-                <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>Senaste</p>
+                <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>{tr("Senaste")}</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
                   {recentFoods.map((e, i) => (
                     <div key={i} style={{ ...glass, borderRadius: 14, padding: "10px 12px 10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5 }}>{e.name || "Måltid"}</div>
+                        <div style={{ fontSize: 13.5 }}>{e.name || tr("Måltid")}</div>
                         <div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>
                           {[formatLogQty(e), `${Math.round(e.kcal || 0)} kcal`].filter(Boolean).join(" · ")}
                         </div>
                       </div>
                       <button onClick={() => relog(e)} style={{ ...primaryBtn, padding: "8px 14px", fontSize: 12.5 }}>
-                        <Plus size={14} /> Logga
+                        <Plus size={14} /> {tr("Logga")}
                       </button>
                     </div>
                   ))}
@@ -1851,9 +2361,9 @@ export default function DotApp() {
             )}
 
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => { setError(""); setMode("photo"); }} style={{ ...ghostBtn, flex: 1 }}><Camera size={14} /> Foto</button>
-              <button onClick={() => { setError(""); setShow100(true); setMode("manual"); }} style={{ ...ghostBtn, flex: 1 }}>Egna värden</button>
-              <button onClick={reset} style={ghostBtn}>Stäng</button>
+              <button onClick={() => { setError(""); setMode("photo"); }} style={{ ...ghostBtn, flex: 1 }}><Camera size={14} /> {tr("Foto")}</button>
+              <button onClick={() => { setError(""); setShow100(true); setMode("manual"); }} style={{ ...ghostBtn, flex: 1 }}>{tr("Egna värden")}</button>
+              <button onClick={reset} style={ghostBtn}>{tr("Stäng")}</button>
             </div>
           </div>
         )}
@@ -1868,20 +2378,20 @@ export default function DotApp() {
           <div className="fade-up" style={{ maxWidth: 420, margin: "20px auto" }}>
             {scanned && foodName.trim() === scanned.name && (
               <div className="fade-up" style={{ ...glass, borderRadius: 12, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: C.textDim, lineHeight: 1.5 }}>
-                <span style={{ color: C.accent }}>Skannad produkt:</span> {scanned.name}{scanned.brand ? ` (${scanned.brand})` : ""} · {Math.round(scanned.per100.kcal)} kcal per 100 g.
-                {scanned.servingGrams ? ` En portion är ${scanned.servingGrams} g enligt förpackningen.` : ""} Ändra mängden om du åt mer eller mindre.
+                <span style={{ color: C.accent }}>{tr("Skannad produkt:")}</span> {scanned.name}{scanned.brand ? ` (${scanned.brand})` : ""} · {Math.round(scanned.per100.kcal)} {tr("kcal per 100 g.")}
+                {scanned.servingGrams ? trf(" En portion är {0} g enligt förpackningen.", scanned.servingGrams) : ""} {tr("Ändra mängden om du åt mer eller mindre.")}
               </div>
             )}
-            <label style={{ fontSize: 12.5, color: C.textDim, display: "block", marginBottom: 6 }}>Matvara</label>
+            <label style={{ fontSize: 12.5, color: C.textDim, display: "block", marginBottom: 6 }}>{tr("Matvara")}</label>
             <input
               value={foodName} onChange={(e) => setFoodName(e.target.value)}
-              placeholder='t.ex. "150 g ris" eller "2 kiwi"'
+              placeholder={tr("t.ex. \"150 g ris\" eller \"2 kiwi\"")}
               style={{
                 width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
                 padding: "10px 12px", color: C.text, fontSize: 14, marginBottom: 16, outline: "none",
               }}
             />
-            <label style={{ fontSize: 12.5, color: C.textDim, display: "block", marginBottom: 6 }}>Mängd</label>
+            <label style={{ fontSize: 12.5, color: C.textDim, display: "block", marginBottom: 6 }}>{tr("Mängd")}</label>
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <input
                 value={weight}
@@ -1909,7 +2419,7 @@ export default function DotApp() {
               </div>
             </div>
             <p style={{ fontSize: 11, color: C.textFaint, marginBottom: 8 }}>
-              T.ex. "1 kopp grönt te" — skriv 1 och välj kopp. DOT räknar om till gram åt dig.
+              {tr("T.ex. \"1 kopp grönt te\" — skriv 1 och välj kopp. DOT räknar om till gram åt dig.")}
             </p>
             <button
               onClick={() => setShow100((v) => !v)}
@@ -1919,12 +2429,12 @@ export default function DotApp() {
               }}
             >
               <ChevronDown size={13} style={{ transform: show100 ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
-              Fyll i kända värden per 100g (valfritt)
+              {tr("Fyll i kända värden per 100g (valfritt)")}
             </button>
             <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: show100 ? 12 : 22 }}>
               {show100
-                ? "Precis som på förpackningen — DOT räknar om till din faktiska vikt. Lämna resten tomt, så fylls det i från ett liknande livsmedel du väljer."
-                : "Vet du t.ex. protein- eller fettinnehållet per 100g (från förpackningen)? Fyll i det du vet — resten hämtas från ett liknande livsmedel."}
+                ? tr("Precis som på förpackningen — DOT räknar om till din faktiska vikt. Lämna resten tomt, så fylls det i från ett liknande livsmedel du väljer.")
+                : tr("Vet du t.ex. protein- eller fettinnehållet per 100g (från förpackningen)? Fyll i det du vet — resten hämtas från ett liknande livsmedel.")}
             </p>
 
             {show100 && (
@@ -1954,7 +2464,7 @@ export default function DotApp() {
                         onFocus={(e) => (e.target.style.borderBottom = `1px solid ${C.accent}`)}
                         onBlur={(e) => (e.target.style.borderBottom = `1px solid transparent`)}
                       />
-                      <span style={{ ...mono, fontSize: 11, color: C.textFaint, width: 34 }}>{f.unit}/100g</span>
+                      <span style={{ ...mono, fontSize: 11, color: C.textFaint, width: 34 }}>{f.unit}{tr("/100g")}</span>
                     </div>
                   </div>
                 ))}
@@ -1965,13 +2475,13 @@ export default function DotApp() {
               <p className="fade-up" style={{ fontSize: 12, color: C.estimate, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>
             )}
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => { setMode("choose"); setError(""); }} style={ghostBtn}>Tillbaka</button>
+              <button onClick={() => { setMode("choose"); setError(""); }} style={ghostBtn}>{tr("Tillbaka")}</button>
               <button
                 onClick={estimateManual} disabled={!foodName.trim() || loading}
                 style={{ ...primaryBtn, opacity: !foodName.trim() ? 0.5 : 1 }}
               >
                 {loading ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : null}
-                {loading ? "Räknar ut värden…" : "Logga"}
+                {loading ? tr("Räknar ut värden…") : tr("Logga")}
               </button>
             </div>
           </div>
@@ -1980,11 +2490,11 @@ export default function DotApp() {
         {/* pick the right database hit */}
         {mode === "pick" && (
           <div className="fade-up" style={{ maxWidth: 480, margin: "20px auto" }}>
-            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>{ownValuesPick ? "Vad liknar din vara mest?" : "Vilken menar du?"}</p>
+            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>{ownValuesPick ? tr("Vad liknar din vara mest?") : tr("Vilken menar du?")}</p>
             <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16, lineHeight: 1.5 }}>
               {ownValuesPick
-                ? "Dina egna värden används alltid. Det du inte fyllt i — t.ex. mättat fett, vitaminer och mineraler — hämtas från det du väljer och märks som uppskattat."
-                : `Träffar för "${foodName}" — värdena är per 100 g. Du loggar ${weight} ${UNIT_LABELS[weightUnit]}.`}
+                ? tr("Dina egna värden används alltid. Det du inte fyllt i — t.ex. mättat fett, vitaminer och mineraler — hämtas från det du väljer och märks som uppskattat.")
+                : trf("Träffar för \"{0}\" — värdena är per 100 g. Du loggar {1} {2}.", foodName, weight, UNIT_LABELS[weightUnit])}
             </p>
             {searchNote && <p style={{ fontSize: 12, color: C.estimate, marginTop: -8, marginBottom: 14 }}>{searchNote}</p>}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
@@ -1992,11 +2502,11 @@ export default function DotApp() {
                 <CandidateButton key={c.id} c={c} disabled={loading} onPick={() => finishManual(c)} />
               ))}
             </div>
-            {loading && <p style={{ fontSize: 12, color: C.textDim, marginBottom: 12 }}>Räknar ut…</p>}
+            {loading && <p style={{ fontSize: 12, color: C.textDim, marginBottom: 12 }}>{tr("Räknar ut…")}</p>}
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setMode("manual")} style={ghostBtn}>Tillbaka</button>
+              <button onClick={() => setMode("manual")} style={ghostBtn}>{tr("Tillbaka")}</button>
               <button onClick={() => finishManual(null)} disabled={loading} style={{ ...ghostBtn, flex: 1 }}>
-                {ownValuesPick ? "Hoppa över — använd bara mina värden" : "Inget av dessa — fyll i själv"}
+                {ownValuesPick ? tr("Hoppa över — använd bara mina värden") : tr("Inget av dessa — fyll i själv")}
               </button>
             </div>
           </div>
@@ -2014,22 +2524,22 @@ export default function DotApp() {
               }}
             >
               {photoData ? (
-                <img src={photoData.preview} alt="förhandsvisning" style={{ maxHeight: 160, borderRadius: 8 }} />
+                <img src={photoData.preview} alt={tr("förhandsvisning")} style={{ maxHeight: 160, borderRadius: 8 }} />
               ) : (
                 <>
                   <Camera size={22} color={C.textDim} />
-                  <span style={{ fontSize: 13, color: C.textDim }}>Ta eller välj en bild</span>
+                  <span style={{ fontSize: 13, color: C.textDim }}>{tr("Ta eller välj en bild")}</span>
                 </>
               )}
             </label>
             <input id="photo-input" type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
 
             <label style={{ fontSize: 12.5, color: C.textDim, display: "block", marginBottom: 6 }}>
-              Beskrivning (valfritt)
+              {tr("Beskrivning (valfritt)")}
             </label>
             <textarea
               value={photoDesc} onChange={(e) => setPhotoDesc(e.target.value)}
-              placeholder="t.ex. kycklingwrap med lite majonnäs, ingen ost"
+              placeholder={tr("t.ex. kycklingwrap med lite majonnäs, ingen ost")}
               rows={3}
               style={{
                 width: "100%", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8,
@@ -2040,12 +2550,12 @@ export default function DotApp() {
               <p className="fade-up" style={{ fontSize: 12, color: C.estimate, marginBottom: 14, lineHeight: 1.5 }}>{error}</p>
             )}
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => { setMode("choose"); setError(""); }} style={ghostBtn}>Tillbaka</button>
+              <button onClick={() => { setMode("choose"); setError(""); }} style={ghostBtn}>{tr("Tillbaka")}</button>
               <button
                 onClick={estimatePhoto} disabled={!photoData || loading}
                 style={{ ...primaryBtn, opacity: !photoData ? 0.5 : 1 }}
               >
-                {loading ? "Analyserar bild…" : "Analysera bild"}
+                {loading ? tr("Analyserar bild…") : tr("Analysera bild")}
               </button>
             </div>
           </div>
@@ -2054,21 +2564,21 @@ export default function DotApp() {
         {/* photo result: det AI såg på bilden, med värden från databasen */}
         {mode === "photo-result" && (
           <div className="fade-up" style={{ maxWidth: 480, margin: "20px auto" }}>
-            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>Det här såg jag på bilden</p>
+            <p style={{ ...display, fontSize: 17, fontWeight: 600, marginBottom: 4 }}>{tr("Det här såg jag på bilden")}</p>
             <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 16, lineHeight: 1.5 }}>
-              Vikterna är uppskattade från bilden. Värdena kommer från livsmedelsdatabasen. Ta bort det som inte stämmer — mängderna kan du ändra efter loggningen genom att trycka på raden.
+              {tr("Vikterna är uppskattade från bilden. Värdena kommer från livsmedelsdatabasen. Ta bort det som inte stämmer — mängderna kan du ändra efter loggningen genom att trycka på raden.")}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
               {photoItems.map((it) => (
                 <div key={it.key} style={{ ...glass, borderRadius: 14, padding: "10px 12px 10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5 }}>{it.name} <span style={{ color: C.textFaint, fontSize: 11.5 }}>· ca {it.grams} g</span></div>
+                    <div style={{ fontSize: 13.5 }}>{it.name} <span style={{ color: C.textFaint, fontSize: 11.5 }}>{tr("· ca")} {it.grams} {tr("g")}</span></div>
                     <div style={{ fontSize: 10.5, color: C.textFaint, marginTop: 2 }}>
-                      Träff: {it.res.matchedName}
-                      {it.res.uncooked && <span style={{ color: C.estimate }}> · okokt vikt</span>}
+                      {tr("Träff:")} {it.res.matchedName}
+                      {it.res.uncooked && <span style={{ color: C.estimate }}> {tr("· okokt vikt")}</span>}
                     </div>
                   </div>
-                  <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(it.res.kcal)} kcal</span>
+                  <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(it.res.kcal)} {tr("kcal")}</span>
                   <button onClick={() => setPhotoItems((list) => list.filter((x) => x.key !== it.key))} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
                     <X size={14} color={C.textFaint} />
                   </button>
@@ -2077,19 +2587,19 @@ export default function DotApp() {
             </div>
             {photoMissing.length > 0 && (
               <p style={{ fontSize: 11.5, color: C.estimate, marginBottom: 12 }}>
-                Hittades inte i databasen och räknas inte med: {photoMissing.join(", ")}. Logga dem gärna separat.
+                {tr("Hittades inte i databasen och räknas inte med:")} {photoMissing.join(", ")}{tr(". Logga dem gärna separat.")}
               </p>
             )}
             <div style={{ ...glass, borderRadius: 14, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, color: C.textDim }}>Totalt</span>
+              <span style={{ fontSize: 13, color: C.textDim }}>{tr("Totalt")}</span>
               <span style={{ ...mono, fontSize: 13, fontWeight: 600 }}>
-                {Math.round(photoItems.reduce((s, it) => s + (it.res.kcal || 0), 0))} kcal · {Math.round(photoItems.reduce((s, it) => s + (it.res.protein_g || 0), 0))}g protein
+                {Math.round(photoItems.reduce((s, it) => s + (it.res.kcal || 0), 0))} {tr("kcal ·")} {Math.round(photoItems.reduce((s, it) => s + (it.res.protein_g || 0), 0))}{tr("g protein")}
               </span>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => { setMode("photo"); setError(""); }} style={ghostBtn}>Tillbaka</button>
+              <button onClick={() => { setMode("photo"); setError(""); }} style={ghostBtn}>{tr("Tillbaka")}</button>
               <button onClick={logPhotoItems} disabled={confirmed || photoItems.length === 0} style={{ ...primaryBtn, flex: 1, opacity: photoItems.length ? 1 : 0.5 }}>
-                <Check size={15} /> Logga allt
+                <Check size={15} /> {tr("Logga allt")}
               </button>
             </div>
           </div>
@@ -2101,11 +2611,11 @@ export default function DotApp() {
             <div>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
                 <div>
-                  <div style={{ ...display, fontSize: 19, fontWeight: 600 }}>{foodName || "Måltid"}</div>
+                  <div style={{ ...display, fontSize: 19, fontWeight: 600 }}>{foodName || tr("Måltid")}</div>
                   {weight && <div style={{ ...mono, fontSize: 12.5, color: C.textFaint }}>{weight} {UNIT_LABELS[weightUnit]}</div>}
                   {result.source && (
                     <div style={{ fontSize: 10.5, color: C.accent, marginTop: 3 }}>
-                      Källa: {result.source}{result.matchedName ? ` · Träff: "${result.matchedName}"` : ""}
+                      {tr("Källa:")} {tr(result.source)}{result.matchedName ? trf(" · Träff: \"{0}\"", result.matchedName) : ""}
                     </div>
                   )}
                   {(result.matchedName || candidates.length > 1) && (
@@ -2113,12 +2623,12 @@ export default function DotApp() {
                       onClick={switchHit} disabled={loading}
                       style={{ background: "none", border: "none", color: C.accent, fontSize: 11.5, cursor: "pointer", padding: 0, marginTop: 6, textDecoration: "underline" }}
                     >
-                      {loading ? "Söker…" : "Byt träff"}
+                      {loading ? tr("Söker…") : tr("Byt träff")}
                     </button>
                   )}
                 </div>
                 <div style={{ ...mono, fontSize: 22, fontWeight: 600, color: C.accent }}>
-                  {Math.round(result.kcal)} <span style={{ fontSize: 12, color: C.textFaint }}>kcal</span>
+                  {Math.round(result.kcal)} <span style={{ fontSize: 12, color: C.textFaint }}>{tr("kcal")}</span>
                 </div>
               </div>
 
@@ -2127,7 +2637,7 @@ export default function DotApp() {
               )}
               {result.uncooked && (
                 <div className="fade-up" style={{ background: C.estimateDim, border: `1px solid ${C.estimate}55`, borderRadius: 10, padding: "9px 12px", marginTop: 10, fontSize: 12, color: C.estimate, lineHeight: 1.5 }}>
-                  Obs: värdena gäller <b>okokt (torr) vikt</b>. Vägde du maten kokt blir det för mycket — tryck <b>Byt träff</b> och välj en kokt variant.
+                  {tr("Obs: värdena gäller")} <b>{tr("okokt (torr) vikt")}</b>{tr(". Vägde du maten kokt blir det för mycket — tryck")} <b>{tr("Byt träff")}</b> {tr("och välj en kokt variant.")}
                 </div>
               )}
 
@@ -2142,7 +2652,7 @@ export default function DotApp() {
                 ))}
               </div>
               <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 18 }}>
-                Vitaminer, mineraler och bra ämnen läggs till din dagliga översikt när du loggar — se fliken <b>Översikt</b> för hela bilden.
+                {tr("Vitaminer, mineraler och bra ämnen läggs till din dagliga översikt när du loggar — se fliken")} <b>{tr("Översikt")}</b> {tr("för hela bilden.")}
               </p>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2159,20 +2669,20 @@ export default function DotApp() {
                   disabled={confirmed}
                   style={{ ...primaryBtn, width: "100%", opacity: confirmed ? 0.6 : 1 }}
                 >
-                  <Check size={15} /> {confirmed ? "Loggat" : "Bekräfta & logga"}
+                  <Check size={15} /> {confirmed ? tr("Loggat") : tr("Bekräfta & logga")}
                 </button>
                 <div style={{ display: "flex", gap: 10 }}>
                   <button onClick={() => setChatOpen((v) => !v)} style={{ ...ghostBtn, flex: 1 }}>
-                    <Sparkles size={14} color={C.accent} /> Fråga AI
+                    <Sparkles size={14} color={C.accent} /> {tr("Fråga AI")}
                   </button>
                   <button onClick={reset} style={{ ...ghostBtn, flex: 1 }}>
-                    <Home size={14} /> Tillbaka hem
+                    <Home size={14} /> {tr("Tillbaka hem")}
                   </button>
                 </div>
               </div>
               {confirmed && (
                 <p className="fade-up" style={{ fontSize: 12.5, color: C.textDim, marginTop: 10 }}>
-                  Sparat till din dagslogg.
+                  {tr("Sparat till din dagslogg.")}
                 </p>
               )}
             </div>
@@ -2184,7 +2694,7 @@ export default function DotApp() {
               }}>
                 <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 6 }}>
                   <Sparkles size={13} color={C.accent} />
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Fråga om värdena</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{tr("Fråga om värdena")}</span>
                   <button onClick={() => setChatOpen(false)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer" }}>
                     <X size={14} color={C.textFaint} />
                   </button>
@@ -2192,7 +2702,7 @@ export default function DotApp() {
                 <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                   {chatMsgs.length === 0 && (
                     <p style={{ fontSize: 12, color: C.textFaint }}>
-                      T.ex. "varför gissar du så mycket protein?" eller "är det här en stor banan?"
+                      {tr("T.ex. \"varför gissar du så mycket protein?\" eller \"är det här en stor banan?\"")}
                     </p>
                   )}
                   {chatMsgs.map((m, i) => (
@@ -2212,7 +2722,7 @@ export default function DotApp() {
                   <input
                     value={chatInput} onChange={(e) => setChatInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && sendChat()}
-                    placeholder="Skriv en fråga…"
+                    placeholder={tr("Skriv en fråga…")}
                     style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 12.5 }}
                   />
                   <button onClick={sendChat} style={{ background: "none", border: "none", cursor: "pointer" }}>
@@ -2227,7 +2737,7 @@ export default function DotApp() {
       )}
           </>
         )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      <style>{tr("@keyframes spin { to { transform: rotate(360deg) } }")}</style>
       </div>
 
         {!isOnboarding && page === "log" && mode === "idle" && (
@@ -2242,7 +2752,7 @@ export default function DotApp() {
               boxShadow: `0 10px 26px ${C.accent}55`,
             }}
           >
-            <Plus size={17} /> Logga
+            <Plus size={17} /> {tr("Logga")}
           </button>
         )}
 
@@ -2253,11 +2763,11 @@ export default function DotApp() {
             borderTop: `1px solid rgba(255,255,255,0.06)`, background: "#0A100C",
           }}>
             {[
-              { key: "history", label: "Kalender", icon: CalendarDays },
-              { key: "progress", label: "Progress", icon: TrendingUp },
-              { key: "log", label: "Hem", icon: Home },
-              { key: "dashboard", label: "Översikt", icon: LayoutGrid },
-              { key: "meals", label: "Måltider", icon: BookOpen },
+              { key: "history", label: tr("Kalender"), icon: CalendarDays },
+              { key: "progress", label: tr("Progress"), icon: TrendingUp },
+              { key: "log", label: tr("Hem"), icon: Home },
+              { key: "dashboard", label: tr("Översikt"), icon: LayoutGrid },
+              { key: "meals", label: tr("Måltider"), icon: BookOpen },
             ].map((t) => {
               const active = page === t.key;
               return (
@@ -2296,21 +2806,21 @@ const onbQ = { ...display, fontSize: 21, fontWeight: 600, marginBottom: 6, lineH
 const onbSub = { fontSize: 12.5, color: C.textDim, marginBottom: 26 };
 
 const ACTIVITY_LEVELS = [
-  { v: "stillasittande", l: "Stillasittande", sub: "Kontorsjobb, mest still, ingen eller sällan träning" },
-  { v: "lätt", l: "Lätt aktiv", sub: "Går/rör dig lite dagligen, tränar lätt 1–3 ggr/vecka" },
-  { v: "moderat", l: "Måttligt aktiv", sub: "Tränar 3–5 ggr/vecka, en del rörelse i vardagen" },
-  { v: "aktiv", l: "Aktiv", sub: "Tränar hårt 6–7 ggr/vecka, eller fysiskt jobb + viss träning" },
-  { v: "mycket aktiv", l: "Mycket aktiv", sub: "Fysiskt tungt jobb och hård träning, dagligen" },
+  { v: "stillasittande", l: tr("Stillasittande"), sub: tr("Kontorsjobb, mest still, ingen eller sällan träning") },
+  { v: "lätt", l: tr("Lätt aktiv"), sub: tr("Går/rör dig lite dagligen, tränar lätt 1–3 ggr/vecka") },
+  { v: "moderat", l: tr("Måttligt aktiv"), sub: tr("Tränar 3–5 ggr/vecka, en del rörelse i vardagen") },
+  { v: "aktiv", l: tr("Aktiv"), sub: tr("Tränar hårt 6–7 ggr/vecka, eller fysiskt jobb + viss träning") },
+  { v: "mycket aktiv", l: tr("Mycket aktiv"), sub: tr("Fysiskt tungt jobb och hård träning, dagligen") },
 ];
 
 const GOALS = [
-  { v: "gå ner i vikt", l: "Gå ner i vikt" },
-  { v: "gå upp i vikt", l: "Gå upp i vikt" },
-  { v: "bibehålla", l: "Bibehålla vikt" },
-  { v: "bygga muskler", l: "Bygga muskler" },
-  { v: "må bättre", l: "Må bättre allmänt" },
-  { v: "fixa min hälsa", l: "Fixa min hälsa" },
-  { v: "äta mer varierat", l: "Äta mer varierat" },
+  { v: "gå ner i vikt", l: tr("Gå ner i vikt") },
+  { v: "gå upp i vikt", l: tr("Gå upp i vikt") },
+  { v: "bibehålla", l: tr("Bibehålla vikt") },
+  { v: "bygga muskler", l: tr("Bygga muskler") },
+  { v: "må bättre", l: tr("Må bättre allmänt") },
+  { v: "fixa min hälsa", l: tr("Fixa min hälsa") },
+  { v: "äta mer varierat", l: tr("Äta mer varierat") },
 ];
 
 function ChipGroup({ options, value, onChange, wrapStyle, large, stack, multi }) {
@@ -2366,12 +2876,12 @@ function DotLogo({ size = 20 }) {
       display: "inline-flex", alignItems: "center", gap: Math.max(2, Math.round(size * 0.06)),
       fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: size, lineHeight: 1, color: C.text, letterSpacing: "0.02em",
     }}>
-      D
+      {tr("D")}
       <span style={{
         width: dot, height: dot, borderRadius: 999, display: "inline-block",
         background: "linear-gradient(135deg, #F2C063, #8FD9A8)", boxShadow: "0 0 12px rgba(143,217,168,.5)",
       }} />
-      T
+      {tr("T")}
     </span>
   );
 }
@@ -2424,18 +2934,18 @@ function microHasData(log, key) {
 
 // "bra ämnen" som finns uppmätta i databaserna — visas när dagens mängd är värd att nämna
 const BONUS_DEFS = [
-  { key: "omega3", name: "Omega-3", unit: "mg", min: 100, reason: "Fleromättat fett som är viktigt för hjärta och hjärna." },
-  { key: "epa_dha", name: "varav EPA + DHA", unit: "mg", min: 50, reason: "Den form av omega-3 som främst finns i fisk och skaldjur." },
-  { key: "beta_carotene", name: "Betakaroten", unit: "µg", min: 300, reason: "Antioxidant som kroppen omvandlar till A-vitamin." },
-  { key: "lycopene", name: "Lykopen", unit: "µg", min: 500, reason: "Antioxidant som ger tomater och vattenmelon sin röda färg." },
-  { key: "lutein", name: "Lutein & zeaxantin", unit: "µg", min: 300, reason: "Antioxidanter som samlas i ögat och hjälper till att skydda synen." },
-  { key: "wholegrain", name: "Fullkorn", unit: "g", min: 5, reason: "Ger fibrer och långsamma kolhydrater som håller dig mätt längre." },
+  { key: "omega3", name: tr("Omega-3"), unit: "mg", min: 100, reason: tr("Fleromättat fett som är viktigt för hjärta och hjärna.") },
+  { key: "epa_dha", name: tr("varav EPA + DHA"), unit: "mg", min: 50, reason: tr("Den form av omega-3 som främst finns i fisk och skaldjur.") },
+  { key: "beta_carotene", name: tr("Betakaroten"), unit: "µg", min: 300, reason: tr("Antioxidant som kroppen omvandlar till A-vitamin.") },
+  { key: "lycopene", name: tr("Lykopen"), unit: "µg", min: 500, reason: tr("Antioxidant som ger tomater och vattenmelon sin röda färg.") },
+  { key: "lutein", name: tr("Lutein & zeaxantin"), unit: "µg", min: 300, reason: tr("Antioxidanter som samlas i ögat och hjälper till att skydda synen.") },
+  { key: "wholegrain", name: tr("Fullkorn"), unit: "g", min: 5, reason: tr("Ger fibrer och långsamma kolhydrater som håller dig mätt längre.") },
 ];
 // nyttiga ämnen som INTE finns uppmätta i våra databaser.
 // För de flesta anges en ungefärlig typisk halt per 100 g (från forskningsdata, t.ex. USDA:s flavonoiddatabas och
 // Phenol-Explorer). Den räknas om efter mängden du loggat och jämförs med en referensmängd → nivå + "ca X mg".
 // För några (probiotika, capsaicin) finns inget meningsfullt mått, där visas bara en fast nivå.
-const LEVEL_LABELS = { 1: "Mycket låg", 2: "Låg", 3: "Medel", 4: "Hög", 5: "Mycket hög" };
+const LEVEL_LABELS = { 1: tr("Mycket låg"), 2: tr("Låg"), 3: tr("Medel"), 4: tr("Hög"), 5: tr("Mycket hög") };
 function levelFromRatio(r) {
   if (r >= 1) return 5;
   if (r >= 0.6) return 4;
@@ -2536,12 +3046,12 @@ function compoundsFor(texts, grams) {
 
 function formatQty(v, unit) {
   const n = v >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
-  return `ca ${n.toLocaleString("sv-SE")} ${unit}`;
+  return `${tr("ca")} ${n.toLocaleString(LOCALE)} ${unit}`;
 }
 
 function formatBonusAmount(v, unit) {
   const n = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
-  return `${n.toLocaleString("sv-SE")} ${unit}`;
+  return `${n.toLocaleString(LOCALE)} ${unit}`;
 }
 
 function sumBonus(dailyLog) {
@@ -2576,9 +3086,10 @@ function sumBonus(dailyLog) {
     } else if (level) {
       amount = LEVEL_LABELS[level];
     }
+    const reason = tr(def ? def.reason : b.reason);
     return {
-      name: b.name, amount, level,
-      reason: b.from.size ? `${b.reason || ""} Finns i: ${[...b.from].join(", ")}.`.trim() : b.reason,
+      name: tr(b.name), amount, level,
+      reason: b.from.size ? `${reason || ""} ${tr("Finns i:")} ${[...b.from].join(", ")}.`.trim() : reason,
     };
   });
   const dbNames = new Set(fromDb.map((b) => b.name.toLowerCase()));
@@ -2616,13 +3127,13 @@ function MicroRow({ def, amount, color, colorDim, open, onToggle, noData }) {
               width: 15, height: 15, borderRadius: 99, border: `1px solid ${C.borderStrong}`, background: "none",
               color: C.textFaint, fontSize: 10, lineHeight: "13px", cursor: "pointer", padding: 0,
             }}
-            aria-label={`Om ${def.name}`}
+            aria-label={trf("Om {0}", def.name)}
           >
-            i
+            {tr("i")}
           </button>
         </div>
         <span style={{ ...mono, fontSize: 11.5, color: noData ? C.textFaint : C.textDim }}>
-          {noData ? "ingen data" : `${Math.round(amount * 10) / 10}${def.unit} · ${pct}%`}
+          {noData ? tr("ingen data") : `${Math.round(amount * 10) / 10}${def.unit} · ${pct}%`}
         </span>
       </div>
       <div style={{ height: 6, borderRadius: 4, background: colorDim, overflow: "hidden" }}>
@@ -2631,14 +3142,14 @@ function MicroRow({ def, amount, color, colorDim, open, onToggle, noData }) {
       {open && (
         <p className="fade-up" style={{ fontSize: 11.5, color: C.textDim, marginTop: 6, marginBottom: 0, paddingLeft: 2 }}>
           {def.blurb}
-          {noData && " Det här ämnet finns inte uppmätt för det du loggat idag, så vi kan inte visa någon mängd — det betyder inte att du får för lite."}
+          {noData && tr(" Det här ämnet finns inte uppmätt för det du loggat idag, så vi kan inte visa någon mängd — det betyder inte att du får för lite.")}
         </p>
       )}
     </div>
   );
 }
 
-const DAY_LABELS = ["Mån", "Tis", "Ons", "Tors", "Fre", "Lör", "Sön"];
+const DAY_LABELS = [tr("Mån"), tr("Tis"), tr("Ons"), tr("Tors"), tr("Fre"), tr("Lör"), tr("Sön")];
 
 function SettingsRow({ icon: Icon, label, sub, onClick, danger }) {
   return (
@@ -2692,7 +3203,7 @@ function Toggle({ on, onChange }) {
 }
 
 function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, onDeleteAccount, units, setUnits }) {
-  const [view, setView] = useState("menu"); // menu | profile | units | privacy | help | about
+  const [view, setView] = useState("menu"); // menu | profile | units | language | privacy | help | about
   const [saved, setSaved] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -2706,42 +3217,42 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
   if (view === "profile") {
     return (
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Profil" onBack={() => setView("menu")} />
+        <SettingsSubHeader title={tr("Profil")} onBack={() => setView("menu")} />
         <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, marginBottom: 22 }}>
           <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}>
-              <label style={onbLabel}>Ålder</label>
+              <label style={onbLabel}>{tr("Ålder")}</label>
               <input value={profileInfo.age} inputMode="numeric"
                 onChange={(e) => setProfileInfo((p) => ({ ...p, age: e.target.value.replace(/[^0-9]/g, "") }))}
                 style={onbInput} />
             </div>
             <div style={{ flex: 1 }}>
-              <label style={onbLabel}>Längd ({units.height === "ft" ? "tum" : "cm"})</label>
+              <label style={onbLabel}>{tr("Längd (")}{units.height === "ft" ? tr("tum") : tr("cm")})</label>
               <input value={displayHeight(profileInfo.height, units.height)} inputMode="numeric"
                 onChange={(e) => setProfileInfo((p) => ({ ...p, height: parseHeightInput(e.target.value.replace(/[^0-9]/g, ""), units.height) }))}
                 style={onbInput} />
             </div>
           </div>
-          <label style={onbLabel}>Vikt ({units.weight === "lbs" ? "lbs" : "kg"})</label>
+          <label style={onbLabel}>{tr("Vikt (")}{units.weight === "lbs" ? tr("lbs") : tr("kg")})</label>
           <input value={displayWeight(profileInfo.weight, units.weight)} inputMode="decimal"
             onChange={(e) => setProfileInfo((p) => ({ ...p, weight: parseWeightInput(e.target.value.replace(",", ".").replace(/[^0-9.]/g, ""), units.weight) }))}
             style={{ ...onbInput, marginBottom: 4 }} />
 
-          <label style={onbLabel}>Land</label>
+          <label style={onbLabel}>{tr("Land")}</label>
           <ChipGroup options={COUNTRIES} value={profileInfo.country}
             onChange={(v) => setProfileInfo((p) => ({ ...p, country: v }))} />
 
-          <label style={onbLabel}>Kön</label>
+          <label style={onbLabel}>{tr("Kön")}</label>
           <ChipGroup
-            options={[{ v: "kvinna", l: "Kvinna" }, { v: "man", l: "Man" }]}
+            options={[{ v: "kvinna", l: tr("Kvinna") }, { v: "man", l: tr("Man") }]}
             value={profileInfo.sex} onChange={(v) => setProfileInfo((p) => ({ ...p, sex: v }))}
           />
 
-          <label style={onbLabel}>Aktivitetsnivå</label>
+          <label style={onbLabel}>{tr("Aktivitetsnivå")}</label>
           <ChipGroup options={ACTIVITY_LEVELS} value={profileInfo.activity}
             onChange={(v) => setProfileInfo((p) => ({ ...p, activity: v }))} stack />
 
-          <label style={onbLabel}>Mål (välj gärna flera)</label>
+          <label style={onbLabel}>{tr("Mål (välj gärna flera)")}</label>
           <ChipGroup
             options={GOALS} value={profileInfo.goal} multi
             onChange={(v) => setProfileInfo((p) => ({
@@ -2751,13 +3262,27 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
           />
         </div>
         <button onClick={handleSave} style={{ ...primaryBtn, width: "100%" }}>
-          <Check size={15} /> Spara ändringar
+          <Check size={15} /> {tr("Spara ändringar")}
         </button>
         {saved && (
           <p className="fade-up" style={{ fontSize: 12, color: C.accent, textAlign: "center", marginTop: 10 }}>
-            Sparat — dina mål är omräknade.
+            {tr("Sparat — dina mål är omräknade.")}
           </p>
         )}
+      </div>
+    );
+  }
+
+  // ---------- language ----------
+  if (view === "language") {
+    return (
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
+        <SettingsSubHeader title="Språk / Language" onBack={() => setView("menu")} />
+        <ChipGroup options={[{ v: "sv", l: "Svenska" }, { v: "en", l: "English" }]} value={LANG}
+          onChange={(v) => { if (v !== LANG) setLanguage(v); }} />
+        <p style={{ fontSize: 11, color: C.textFaint, marginTop: 16 }}>
+          {tr("Appen laddas om på det valda språket. Livsmedelsnamnen visas på engelska när det finns en översättning.")}
+        </p>
       </div>
     );
   }
@@ -2766,15 +3291,15 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
   if (view === "units") {
     return (
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Enheter" onBack={() => setView("menu")} />
-        <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Vikt</p>
-        <ChipGroup options={[{ v: "kg", l: "Kilogram (kg)" }, { v: "lbs", l: "Pund (lbs)" }]} value={units.weight}
+        <SettingsSubHeader title={tr("Enheter")} onBack={() => setView("menu")} />
+        <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>{tr("Vikt")}</p>
+        <ChipGroup options={[{ v: "kg", l: tr("Kilogram (kg)") }, { v: "lbs", l: tr("Pund (lbs)") }]} value={units.weight}
           onChange={(v) => setUnits((u) => ({ ...u, weight: v }))} />
-        <p style={{ fontSize: 12, color: C.textFaint, margin: "14px 0 8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Längd</p>
-        <ChipGroup options={[{ v: "cm", l: "Centimeter (cm)" }, { v: "ft", l: "Fot/tum (ft/in)" }]} value={units.height}
+        <p style={{ fontSize: 12, color: C.textFaint, margin: "14px 0 8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{tr("Längd")}</p>
+        <ChipGroup options={[{ v: "cm", l: tr("Centimeter (cm)") }, { v: "ft", l: tr("Fot/tum (ft/in)") }]} value={units.height}
           onChange={(v) => setUnits((u) => ({ ...u, height: v }))} />
         <p style={{ fontSize: 11, color: C.textFaint, marginTop: 16 }}>
-          Ändringen gäller direkt — vikt och längd visas och räknas om i din valda enhet överallt i appen (sparas alltid i kg/cm internt).
+          {tr("Ändringen gäller direkt — vikt och längd visas och räknas om i din valda enhet överallt i appen (sparas alltid i kg/cm internt).")}
         </p>
       </div>
     );
@@ -2784,21 +3309,21 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
   if (view === "privacy") {
     return (
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Dataskydd & export" onBack={() => setView("menu")} />
+        <SettingsSubHeader title={tr("Dataskydd")} onBack={() => setView("menu")} />
         <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
           <p style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6, marginBottom: 10 }}>
-            Din data (loggar, vikt, måltider och progressbilder) sparas på ditt konto och säljs eller delas aldrig för reklam.
+            {tr("Din data (loggar, vikt, måltider och progressbilder) sparas på ditt konto och säljs eller delas aldrig för reklam.")}
           </p>
           <p style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6, marginBottom: 10 }}>
-            När du loggar med fri text eller foto skickas texten eller bilden till vår AI-leverantör (Anthropic) för att tolkas — vad du åt och ungefär hur mycket. Näringsvärdena kommer alltid från livsmedelsdatabaserna, aldrig från AI:n.
+            {tr("När du loggar med fri text eller foto skickas texten eller bilden till vår AI-leverantör (Anthropic) för att tolkas — vad du åt och ungefär hur mycket. Näringsvärdena kommer alltid från livsmedelsdatabaserna, aldrig från AI:n.")}
           </p>
           <p style={{ fontSize: 13, color: C.textDim, lineHeight: 1.6 }}>
-            Du kan när som helst radera ditt konto under Inställningar — då raderas all din data permanent.
+            {tr("Du kan när som helst radera ditt konto under Inställningar — då raderas all din data permanent.")}
           </p>
         </div>
-        <a href="/integritet.html" target="_blank" rel="noopener noreferrer"
+        <a href={PRIVACY_URL} target="_blank" rel="noopener noreferrer"
           style={{ ...ghostBtn, width: "100%", justifyContent: "flex-start", padding: "13px 16px", textDecoration: "none", boxSizing: "border-box" }}>
-          Läs hela integritetspolicyn
+          {tr("Läs hela integritetspolicyn")}
         </a>
       </div>
     );
@@ -2808,13 +3333,13 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
   if (view === "help") {
     return (
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Hjälp & support" onBack={() => setView("menu")} />
+        <SettingsSubHeader title={tr("Hjälp & support")} onBack={() => setView("menu")} />
         <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 }}>
           <p style={{ fontSize: 13, color: C.textDim, marginBottom: 14, lineHeight: 1.6 }}>
-            Stötte du på ett problem, eller har du en idé till en ny funktion? Hör av dig.
+            {tr("Stötte du på ett problem, eller har du en idé till en ny funktion? Hör av dig.")}
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.accent }}>
-            <Mail size={14} /> Kontaktadress kommer snart
+            <Mail size={14} /> {tr("Kontaktadress kommer snart")}
           </div>
         </div>
       </div>
@@ -2825,17 +3350,16 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
   if (view === "about") {
     return (
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-        <SettingsSubHeader title="Om DOT" onBack={() => setView("menu")} />
+        <SettingsSubHeader title={tr("Om DOT")} onBack={() => setView("menu")} />
         <div style={{ textAlign: "center", padding: "30px 0" }}>
 <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><DotLogo size={34} /></div>
-          <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>Version 0.1 (prototyp)</p>
-          <p style={{ ...display, fontSize: 14, color: C.text, marginTop: 14 }}>Discipline Over Time.</p>
+          <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>{tr("Version 0.1 (prototyp)")}</p>
+          <p style={{ ...display, fontSize: 14, color: C.text, marginTop: 14 }}>{tr("Discipline Over Time.")}</p>
           <p style={{ fontSize: 12.5, color: C.textDim, marginTop: 14, maxWidth: 320, marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
-            DOT står för disciplin och tålamod — de två saker som krävs för att lyckas, i livet och med kosten.
-            Små val varje dag, under lång tid.
+            {tr("DOT står för disciplin och tålamod — de två saker som krävs för att lyckas, i livet och med kosten. Små val varje dag, under lång tid.")}
           </p>
           <p style={{ fontSize: 11, color: C.textFaint, marginTop: 24, maxWidth: 320, marginLeft: "auto", marginRight: "auto", lineHeight: 1.6 }}>
-            Näringsdata: Livsmedelsverkets livsmedelsdatabas (Livsmedelsverket, CC BY 4.0), USDA FoodData Central och Open Food Facts (ODbL).
+            {tr("Näringsdata: Livsmedelsverkets livsmedelsdatabas (Livsmedelsverket, CC BY 4.0), USDA FoodData Central och Open Food Facts (ODbL).")}
           </p>
         </div>
       </div>
@@ -2845,41 +3369,42 @@ function SettingsPage({ profileInfo, setProfileInfo, onSave, onBack, onLogout, o
   // ---------- main menu ----------
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 40px" }}>
-      <SettingsSubHeader title="Inställningar" onBack={onBack} />
+      <SettingsSubHeader title={tr("Inställningar")} onBack={onBack} />
 
-      <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>Konto</p>
-      <SettingsRow icon={User} label="Profil" sub="Ålder, vikt, mål och aktivitetsnivå" onClick={() => setView("profile")} />
+      <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>{tr("Konto")}</p>
+      <SettingsRow icon={User} label={tr("Profil")} sub={tr("Ålder, vikt, mål och aktivitetsnivå")} onClick={() => setView("profile")} />
 
-      <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Preferenser</p>
-      <SettingsRow icon={Ruler} label="Enheter" sub={`${units.weight} · ${units.height}`} onClick={() => setView("units")} />
+      <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{tr("Preferenser")}</p>
+      <SettingsRow icon={Globe} label="Språk / Language" sub={LANG === "sv" ? "Svenska" : "English"} onClick={() => setView("language")} />
+      <SettingsRow icon={Ruler} label={tr("Enheter")} sub={`${units.weight} · ${units.height}`} onClick={() => setView("units")} />
 
-      <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Data & support</p>
-      <SettingsRow icon={ShieldCheck} label="Dataskydd & export" onClick={() => setView("privacy")} />
-      <SettingsRow icon={HelpCircle} label="Hjälp & support" onClick={() => setView("help")} />
-      <SettingsRow icon={Info} label="Om DOT" sub="Version 0.1" onClick={() => setView("about")} />
+      <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>{tr("Data & support")}</p>
+      <SettingsRow icon={ShieldCheck} label={tr("Dataskydd")} onClick={() => setView("privacy")} />
+      <SettingsRow icon={HelpCircle} label={tr("Hjälp & support")} onClick={() => setView("help")} />
+      <SettingsRow icon={Info} label={tr("Om DOT")} sub={tr("Version 0.1")} onClick={() => setView("about")} />
 
       <p style={{ fontSize: 12, color: C.textFaint, margin: "22px 0 4px", textTransform: "uppercase", letterSpacing: "0.04em" }}>&nbsp;</p>
-      <SettingsRow icon={LogOut} label="Logga ut" onClick={onLogout} />
+      <SettingsRow icon={LogOut} label={tr("Logga ut")} onClick={onLogout} />
 
       {!confirmDelete && (
-        <SettingsRow icon={Trash2} label="Radera konto" danger onClick={() => setConfirmDelete(true)} />
+        <SettingsRow icon={Trash2} label={tr("Radera konto")} danger onClick={() => setConfirmDelete(true)} />
       )}
       {confirmDelete && (
         <div className="fade-up" style={{ ...glass, borderRadius: 14, padding: 16, marginTop: 12 }}>
           <p style={{ fontSize: 13, marginBottom: 12 }}>
-            Är du säker? All din data (loggar, måltider, vikt, bilder) raderas permanent.
+            {tr("Är du säker? All din data (loggar, måltider, vikt, bilder) raderas permanent.")}
           </p>
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => setConfirmDelete(false)} style={{ ...ghostBtn, flex: 1 }}>Avbryt</button>
+            <button onClick={() => setConfirmDelete(false)} style={{ ...ghostBtn, flex: 1 }}>{tr("Avbryt")}</button>
             <button onClick={onDeleteAccount} style={{ ...primaryBtn, flex: 1, background: "#E08F8F", boxShadow: "none", color: "#2a0f0f" }}>
-              Ja, radera
+              {tr("Ja, radera")}
             </button>
           </div>
         </div>
       )}
 
       <p style={{ textAlign: "center", fontSize: 11, color: C.textFaint, marginTop: 26 }}>
-        DOT · prototyp v0.1
+        {tr("DOT · prototyp v0.1")}
       </p>
     </div>
   );
@@ -2914,7 +3439,7 @@ function HistoryPage({ dayFoodLogs, weekLog, units = { weight: "kg", height: "cm
     return Math.round(pcts.reduce((s, p) => s + p, 0) / pcts.length);
   };
 
-  const monthLabel = viewMonth.toLocaleDateString("sv-SE", { month: "long", year: "numeric" });
+  const monthLabel = viewMonth.toLocaleDateString(LOCALE, { month: "long", year: "numeric" });
   const isCurrentMonth = viewMonth.getMonth() === new Date().getMonth() && viewMonth.getFullYear() === new Date().getFullYear();
 
   function changeMonth(delta) {
@@ -2923,8 +3448,8 @@ function HistoryPage({ dayFoodLogs, weekLog, units = { weight: "kg", height: "cm
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 0" }}>
-      <p style={{ ...display, fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Kalender</p>
-      <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 18 }}>Titta tillbaka på vilken dag som helst — bläddra hur långt bak du vill.</p>
+      <p style={{ ...display, fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{tr("Kalender")}</p>
+      <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 18 }}>{tr("Titta tillbaka på vilken dag som helst — bläddra hur långt bak du vill.")}</p>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <button onClick={() => changeMonth(-1)} style={{ background: "none", border: "none", cursor: "pointer", padding: 6 }}>
@@ -2975,7 +3500,7 @@ function HistoryPage({ dayFoodLogs, weekLog, units = { weight: "kg", height: "cm
 
       {entries.length === 0 && !dayInfo.weight && !dayInfo.photo && (
         <p style={{ fontSize: 12.5, color: C.textFaint, textAlign: "center", padding: "30px 0" }}>
-          Inget loggat den här dagen.
+          {tr("Inget loggat den här dagen.")}
         </p>
       )}
 
@@ -2983,35 +3508,35 @@ function HistoryPage({ dayFoodLogs, weekLog, units = { weight: "kg", height: "cm
         <>
           <div style={{ ...glass, borderRadius: 16, padding: 18, marginBottom: 14 }}>
             <div style={{ display: "flex", gap: 10 }}>
-              <MiniStat label="Kalorier" value={Math.round(totals.kcal)} unit="kcal" color={C.accent} />
-              <MiniStat label="Vitaminer" value={entries.length ? avgPct(VITAMINS, vitaminTotals) : 0} unit="%" color={C.vitamin} />
-              <MiniStat label="Mineraler" value={entries.length ? avgPct(MINERALS, mineralTotals) : 0} unit="%" color={C.mineral} />
+              <MiniStat label={tr("Kalorier")} value={Math.round(totals.kcal)} unit="kcal" color={C.accent} />
+              <MiniStat label={tr("Vitaminer")} value={entries.length ? avgPct(VITAMINS, vitaminTotals) : 0} unit="%" color={C.vitamin} />
+              <MiniStat label={tr("Mineraler")} value={entries.length ? avgPct(MINERALS, mineralTotals) : 0} unit="%" color={C.mineral} />
             </div>
           </div>
 
           {dayInfo.weight && (
             <div style={{ ...glass, borderRadius: 16, padding: "14px 18px", marginBottom: 14, display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13 }}>Vikt</span>
-              <span style={{ ...mono, fontSize: 13, color: C.text }}>{displayWeight(dayInfo.weight, units.weight)} {units.weight === "lbs" ? "lbs" : "kg"}</span>
+              <span style={{ fontSize: 13 }}>{tr("Vikt")}</span>
+              <span style={{ ...mono, fontSize: 13, color: C.text }}>{displayWeight(dayInfo.weight, units.weight)} {units.weight === "lbs" ? tr("lbs") : tr("kg")}</span>
             </div>
           )}
 
           {dayInfo.photo && (
             <div style={{ ...glass, borderRadius: 16, padding: 12, marginBottom: 14, display: "flex", justifyContent: "center" }}>
-              <img src={dayInfo.photo} alt="progressbild" style={{ maxHeight: 180, borderRadius: 10 }} />
+              <img src={dayInfo.photo} alt={tr("progressbild")} style={{ maxHeight: 180, borderRadius: 10 }} />
             </div>
           )}
 
           {entries.length > 0 && (
             <div style={{ marginBottom: 24 }}>
               <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                Loggade måltider
+                {tr("Loggade måltider")}
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {entries.map((e, i) => (
                   <div key={i} style={{ ...glass, borderRadius: 14, padding: "12px 16px", display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 13.5 }}>{e.name || "Måltid"}</span>
-                    <span style={{ ...mono, fontSize: 12.5, color: C.accent }}>{Math.round(e.kcal || 0)} kcal</span>
+                    <span style={{ fontSize: 13.5 }}>{e.name || tr("Måltid")}</span>
+                    <span style={{ ...mono, fontSize: 12.5, color: C.accent }}>{Math.round(e.kcal || 0)} {tr("kcal")}</span>
                   </div>
                 ))}
               </div>
@@ -3056,14 +3581,14 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
     const res = await estimateFoodValues(ingName, ingWeight, ingUnit, ingKnown100, hit);
     setIngCandidates([]);
     if (res.notFound) {
-      setIngError(`Hittade inte "${ingName}" i databasen. Kolla stavningen, prova engelska (t.ex. "chicken breast") eller fyll i värdena per 100g nedanför.`);
+      setIngError(trf("Hittade inte \"{0}\" i databasen. Kolla stavningen, prova engelska (t.ex. \"chicken breast\") eller fyll i värdena per 100g nedanför.", ingName));
       setIngShow100(true);
       setIngLoading(false);
       return;
     }
     if (hit) saveChoice(session, normalizeQuery(ingName), hit);
     setIngredients((list) => [...list, { name: ingName, weight: ingWeight, unit: ingUnit, ...res }]);
-    if (res.microsMissing) setIngError("Ingrediensen är tillagd, men vitaminer och mineraler finns inte uppmätta för den.");
+    if (res.microsMissing) setIngError(tr("Ingrediensen är tillagd, men vitaminer och mineraler finns inte uppmätta för den."));
     setIngName(""); setIngWeight(""); setIngUnit("g"); setIngKnown100({}); setIngShow100(false);
     setIngLoading(false);
     setAdding(false);
@@ -3097,13 +3622,13 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
         <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
           <ChevronLeft size={19} color={C.textDim} />
         </button>
-        <p style={{ ...display, fontSize: 16, fontWeight: 600 }}>Ny måltid</p>
+        <p style={{ ...display, fontSize: 16, fontWeight: 600 }}>{tr("Ny måltid")}</p>
       </div>
 
-      <label style={onbLabel}>Namn på måltiden</label>
+      <label style={onbLabel}>{tr("Namn på måltiden")}</label>
       <input
         value={mealName} onChange={(e) => setMealName(e.target.value)}
-        placeholder="t.ex. Min PWO-måltid" style={{ ...onbInput, marginBottom: 20 }}
+        placeholder={tr("t.ex. Min PWO-måltid")} style={{ ...onbInput, marginBottom: 20 }}
       />
 
       {ingError && (
@@ -3113,15 +3638,15 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
       {ingredients.length > 0 && (
         <>
           <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Ingredienser ({ingredients.length})
+            {tr("Ingredienser (")}{ingredients.length})
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
             {ingredients.map((ing, i) => (
               <div key={i} style={{ ...glass, borderRadius: 14, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 13.5 }}>{ing.name} <span style={{ color: C.textFaint, fontSize: 11.5 }}>· {ing.weight} {UNIT_LABELS[ing.unit] || "g"}</span></p>
+                  <p style={{ fontSize: 13.5 }}>{ing.name} <span style={{ color: C.textFaint, fontSize: 11.5 }}>· {ing.weight} {UNIT_LABELS[ing.unit] || tr("g")}</span></p>
                 </div>
-                <span style={{ ...mono, fontSize: 12, color: C.accent }}>{Math.round(ing.kcal)} kcal</span>
+                <span style={{ ...mono, fontSize: 12, color: C.accent }}>{Math.round(ing.kcal)} {tr("kcal")}</span>
                 <button onClick={() => removeIngredient(i)} style={{ background: "none", border: "none", cursor: "pointer" }}>
                   <X size={14} color={C.textFaint} />
                 </button>
@@ -3130,9 +3655,9 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
           </div>
 
           <div style={{ ...glass, borderRadius: 14, padding: "12px 16px", marginBottom: 20, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 13, color: C.textDim }}>Totalt</span>
+            <span style={{ fontSize: 13, color: C.textDim }}>{tr("Totalt")}</span>
             <span style={{ ...mono, fontSize: 13, fontWeight: 600 }}>
-              {Math.round(totals.kcal || 0)} kcal · {Math.round(totals.protein_g || 0)}g protein
+              {Math.round(totals.kcal || 0)} {tr("kcal ·")} {Math.round(totals.protein_g || 0)}{tr("g protein")}
             </span>
           </div>
         </>
@@ -3147,15 +3672,15 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
             fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 13.5,
           }}
         >
-          <Plus size={16} /> Lägg till ingrediens
+          <Plus size={16} /> {tr("Lägg till ingrediens")}
         </button>
       )}
 
       {adding && (
         <div className="fade-up" style={{ ...glass, borderRadius: 16, padding: 18, marginBottom: 20 }}>
-          <label style={onbLabel}>Ingrediens</label>
-          <input value={ingName} onChange={(e) => setIngName(e.target.value)} placeholder="t.ex. kycklingfilé" style={onbInput} />
-          <label style={onbLabel}>Mängd</label>
+          <label style={onbLabel}>{tr("Ingrediens")}</label>
+          <input value={ingName} onChange={(e) => setIngName(e.target.value)} placeholder={tr("t.ex. kycklingfilé")} style={onbInput} />
+          <label style={onbLabel}>{tr("Mängd")}</label>
           <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
             <input
               value={ingWeight} inputMode="numeric"
@@ -3184,7 +3709,7 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
             style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: C.textDim, fontSize: 12, padding: "8px 0" }}
           >
             <ChevronDown size={12} style={{ transform: ingShow100 ? "rotate(180deg)" : "none" }} />
-            Kända värden per 100g (valfritt)
+            {tr("Kända värden per 100g (valfritt)")}
           </button>
           {ingShow100 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
@@ -3204,24 +3729,24 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
 
           {ingCandidates.length > 0 && (
             <div className="fade-up" style={{ marginTop: 12, marginBottom: 8 }}>
-              <p style={{ fontSize: 12, color: C.textDim, marginBottom: 8 }}>Vilken menar du? (värden per 100 g)</p>
+              <p style={{ fontSize: 12, color: C.textDim, marginBottom: 8 }}>{tr("Vilken menar du? (värden per 100 g)")}</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {ingCandidates.map((c) => (
                   <CandidateButton key={c.id} c={c} disabled={ingLoading} onPick={() => finishIngredient(c)} />
                 ))}
                 <button onClick={() => finishIngredient(null)} disabled={ingLoading} style={{ ...ghostBtn, width: "100%" }}>
-                  Inget av dessa — använd mina värden
+                  {tr("Inget av dessa — använd mina värden")}
                 </button>
               </div>
             </div>
           )}
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <button onClick={() => { setAdding(false); setIngName(""); setIngWeight(""); setIngError(""); setIngCandidates([]); }} style={ghostBtn}>Avbryt</button>
+            <button onClick={() => { setAdding(false); setIngName(""); setIngWeight(""); setIngError(""); setIngCandidates([]); }} style={ghostBtn}>{tr("Avbryt")}</button>
             <button
               onClick={addIngredient} disabled={!ingName.trim() || !ingWeight.trim() || ingLoading}
               style={{ ...primaryBtn, opacity: !ingName.trim() || !ingWeight.trim() ? 0.5 : 1 }}
             >
-              {ingLoading ? "Räknar ut…" : "Lägg till"}
+              {ingLoading ? tr("Räknar ut…") : tr("Lägg till")}
             </button>
           </div>
         </div>
@@ -3232,7 +3757,7 @@ function MealBuilderPage({ mealName, setMealName, ingredients, setIngredients, o
         disabled={!mealName.trim() || ingredients.length === 0}
         style={{ ...primaryBtn, width: "100%", opacity: !mealName.trim() || ingredients.length === 0 ? 0.5 : 1 }}
       >
-        <Check size={15} /> Spara måltid
+        <Check size={15} /> {tr("Spara måltid")}
       </button>
     </div>
   );
@@ -3249,9 +3774,9 @@ function MealsPage({ savedMeals, setSavedMeals, onLogMeal, onCreateNew, session 
   }
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 0" }}>
-      <p style={{ ...display, fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Mina måltider</p>
+      <p style={{ ...display, fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{tr("Mina måltider")}</p>
       <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 18 }}>
-        Spara måltider du äter ofta — logga dem sen med ett klick istället för att fylla i allt igen.
+        {tr("Spara måltider du äter ofta — logga dem sen med ett klick istället för att fylla i allt igen.")}
       </p>
 
       <button
@@ -3262,12 +3787,12 @@ function MealsPage({ savedMeals, setSavedMeals, onLogMeal, onCreateNew, session 
           fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600, fontSize: 13.5,
         }}
       >
-        <Plus size={16} /> Skapa ny måltid
+        <Plus size={16} /> {tr("Skapa ny måltid")}
       </button>
 
       {savedMeals.length === 0 && (
         <p style={{ fontSize: 12.5, color: C.textFaint, textAlign: "center", padding: "20px 0" }}>
-          Inga sparade måltider än. T.ex. din vanliga PWO-måltid — skapa den en gång, logga den sen på en sekund.
+          {tr("Inga sparade måltider än. T.ex. din vanliga PWO-måltid — skapa den en gång, logga den sen på en sekund.")}
         </p>
       )}
 
@@ -3277,14 +3802,14 @@ function MealsPage({ savedMeals, setSavedMeals, onLogMeal, onCreateNew, session 
             <div style={{ flex: 1 }}>
               <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{meal.name}</p>
               <p style={{ ...mono, fontSize: 11.5, color: C.textFaint }}>
-                {Math.round(meal.kcal)} kcal · {Math.round(meal.protein_g)}g protein
+                {Math.round(meal.kcal)} {tr("kcal ·")} {Math.round(meal.protein_g)}{tr("g protein")}
               </p>
             </div>
             <button onClick={() => removeMeal(meal.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
               <Trash2 size={15} color={C.textFaint} />
             </button>
             <button onClick={() => onLogMeal(meal)} style={{ ...primaryBtn, padding: "9px 16px", fontSize: 12.5 }}>
-              Logga
+              {tr("Logga")}
             </button>
           </div>
         ))}
@@ -3318,18 +3843,18 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
     const wantsUp = goals.includes("gå upp i vikt");
     const flat = Math.abs(weightChange) < 0.2;
     if (wantsDown) {
-      if (weightChange < -0.2) return "Bra jobbat, du är på rätt spår mot ditt mål! 📉";
-      if (flat) return "Vikten låg still — kolla gärna över kalorierna om nedgång är målet.";
-      return "Inte den bästa veckan för viktnedgång, men du kommer dit. 💪";
+      if (weightChange < -0.2) return tr("Bra jobbat, du är på rätt spår mot ditt mål! 📉");
+      if (flat) return tr("Vikten låg still — kolla gärna över kalorierna om nedgång är målet.");
+      return tr("Inte den bästa veckan för viktnedgång, men du kommer dit. 💪");
     }
     if (wantsUp) {
-      if (weightChange > 0.2) return "Bra jobbat, du är på rätt spår mot ditt mål! 📈";
-      if (flat) return "Vikten låg still — kolla gärna över kalorierna om uppgång är målet.";
-      return "Inte den bästa veckan för viktuppgång, men du kommer dit. 💪";
+      if (weightChange > 0.2) return tr("Bra jobbat, du är på rätt spår mot ditt mål! 📈");
+      if (flat) return tr("Vikten låg still — kolla gärna över kalorierna om uppgång är målet.");
+      return tr("Inte den bästa veckan för viktuppgång, men du kommer dit. 💪");
     }
     // maintain / feel-better / health-focused goals
-    if (flat) return "Stabil vecka — precis vad som passar om du vill bibehålla vikten. 👍";
-    return "Vikten rörde sig en del denna vecka — helt normalt, följ trenden över flera veckor.";
+    if (flat) return tr("Stabil vecka — precis vad som passar om du vill bibehålla vikten. 👍");
+    return tr("Vikten rörde sig en del denna vecka — helt normalt, följ trenden över flera veckor.");
   }
 
   // siffrorna för den valda dagen, från matloggningen
@@ -3391,10 +3916,10 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
       });
       if (!res.ok) {
         const errBody = await res.text().catch(() => "");
-        throw new Error(`Uppladdningen misslyckades (${res.status}): ${errBody}`);
+        throw new Error(trf("Uppladdningen misslyckades ({0}): {1}", res.status, errBody));
       }
       const signed = await signPhotoPaths(session.access_token, [path]);
-      if (!signed[path]) throw new Error("Bilden laddades upp men kunde inte visas. Ladda om sidan.");
+      if (!signed[path]) throw new Error(tr("Bilden laddades upp men kunde inte visas. Ladda om sidan."));
       updateDay("photo", signed[path], { photoPath: path });
     } catch (err) {
       setPhotoError(err.message);
@@ -3406,9 +3931,9 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "28px 24px 0" }}>
-      <p style={{ ...display, fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Denna vecka</p>
+      <p style={{ ...display, fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{tr("Denna vecka")}</p>
       <p style={{ fontSize: 12, color: C.textFaint, marginBottom: 18 }}>
-        Logga vikt och valfria bilder per dag — så mycket eller lite som du vill.
+        {tr("Logga vikt och valfria bilder per dag — så mycket eller lite som du vill.")}
       </p>
 
       {isSunday && (
@@ -3417,22 +3942,22 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
         }}>
           <div>
-            <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 2 }}>🎉 1 hel vecka avklarad!</p>
-            <p style={{ fontSize: 11.5, color: C.textFaint }}>Här är översikten för denna vecka.</p>
+            <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{tr("🎉 1 hel vecka avklarad!")}</p>
+            <p style={{ fontSize: 11.5, color: C.textFaint }}>{tr("Här är översikten för denna vecka.")}</p>
           </div>
           <button onClick={() => setShowSummary((s) => !s)} style={{ ...ghostBtn, padding: "8px 14px", flexShrink: 0 }}>
-            {showSummary ? "Dölj" : "Visa"}
+            {showSummary ? tr("Dölj") : tr("Visa")}
           </button>
         </div>
       )}
 
       {showSummary && (
         <div className="fade-up" style={{ ...glass, borderRadius: 16, padding: 18, marginBottom: 18 }}>
-          <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Veckosammanfattning</p>
+          <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 14 }}>{tr("Veckosammanfattning")}</p>
           <div style={{ display: "flex", gap: 10, marginBottom: 4 }}>
-            <MiniStat label="Dagar loggade" value={daysLogged} unit="/7" color={C.accent} />
+            <MiniStat label={tr("Dagar loggade")} value={daysLogged} unit="/7" color={C.accent} />
             <MiniStat
-              label="Viktförändring"
+              label={tr("Viktförändring")}
               value={weightChange === null ? "–" : (() => {
                 const converted = units.weight === "lbs" ? Math.round(weightChange * 2.20462 * 10) / 10 : weightChange;
                 return converted > 0 ? `+${converted}` : converted;
@@ -3442,10 +3967,10 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
           </div>
           <p style={{ fontSize: 11, color: C.textFaint, marginTop: 12 }}>
             {daysLogged === 0
-              ? "Logga vikt några dagar den här veckan så räknar vi ut din trend."
+              ? tr("Logga vikt några dagar den här veckan så räknar vi ut din trend.")
               : weightChange === null
-                ? "Logga vikt minst två dagar för att se en förändring över veckan."
-                : "Baserat på första och senaste viktloggningen denna vecka."}
+                ? tr("Logga vikt minst två dagar för att se en förändring över veckan.")
+                : tr("Baserat på första och senaste viktloggningen denna vecka.")}
           </p>
           {weightMessage() && (
             <p style={{ ...display, fontSize: 13, fontWeight: 600, marginTop: 12, color: C.accent }}>
@@ -3457,7 +3982,7 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
 
       {!isSunday && !showSummary && (
         <p onClick={() => setShowSummary(true)} style={{ fontSize: 11.5, color: C.accent, cursor: "pointer", marginBottom: 16 }}>
-          Se exempel på veckosammanfattning →
+          {tr("Se exempel på veckosammanfattning →")}
         </p>
       )}
 
@@ -3488,25 +4013,25 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
 
       {!hasFood && (
         <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 14 }}>
-          Ingen mat loggad den här dagen.
+          {tr("Ingen mat loggad den här dagen.")}
         </p>
       )}
 
       <div style={{ ...glass, borderRadius: 16, padding: 18, marginBottom: 14 }}>
-        <p style={{ fontSize: 12, color: C.textDim, marginBottom: 14 }}>Från matloggningen</p>
+        <p style={{ fontSize: 12, color: C.textDim, marginBottom: 14 }}>{tr("Från matloggningen")}</p>
         <div style={{ display: "flex", gap: 10 }}>
-          <MiniStat label="Kalorier" value={hasFood ? Math.round(kcalToday) : "–"} unit="kcal" color={C.accent} />
-          <MiniStat label="Vitaminer" value={hasFood ? vitaminPct : "–"} unit="%" color={C.vitamin} />
-          <MiniStat label="Mineraler" value={hasFood ? mineralPct : "–"} unit="%" color={C.mineral} />
+          <MiniStat label={tr("Kalorier")} value={hasFood ? Math.round(kcalToday) : "–"} unit="kcal" color={C.accent} />
+          <MiniStat label={tr("Vitaminer")} value={hasFood ? vitaminPct : "–"} unit="%" color={C.vitamin} />
+          <MiniStat label={tr("Mineraler")} value={hasFood ? mineralPct : "–"} unit="%" color={C.mineral} />
         </div>
       </div>
 
       <div style={{ ...glass, borderRadius: 16, padding: 18, marginBottom: 14 }}>
-        <label style={onbLabel}>Vikt denna dag ({units.weight === "lbs" ? "lbs" : "kg"})</label>
+        <label style={onbLabel}>{tr("Vikt denna dag (")}{units.weight === "lbs" ? tr("lbs") : tr("kg")})</label>
         <input
           value={dayData.weight ? displayWeight(dayData.weight, units.weight) : ""} inputMode="decimal"
           onChange={(e) => updateDay("weight", parseWeightInput(e.target.value.replace(",", ".").replace(/[^0-9.]/g, ""), units.weight))}
-          placeholder={units.weight === "lbs" ? "t.ex. 164" : "t.ex. 74.5"} style={onbInput}
+          placeholder={units.weight === "lbs" ? tr("t.ex. 164") : tr("t.ex. 74.5")} style={onbInput}
         />
       </div>
 
@@ -3520,15 +4045,15 @@ function ProgressPage({ dailyLog, dayFoodLogs = {}, weekLog, setWeekLog, selecte
         {photoUploading ? (
           <>
             <Loader2 size={20} color={C.accent} style={{ animation: "spin 1s linear infinite" }} />
-            <span style={{ fontSize: 12.5, color: C.textDim }}>Laddar upp bilden…</span>
+            <span style={{ fontSize: 12.5, color: C.textDim }}>{tr("Laddar upp bilden…")}</span>
           </>
         ) : dayData.photo ? (
-          <img src={dayData.photo} alt="progressbild" style={{ maxHeight: 160, borderRadius: 10 }} />
+          <img src={dayData.photo} alt={tr("progressbild")} style={{ maxHeight: 160, borderRadius: 10 }} />
         ) : (
           <>
             <Camera size={20} color={C.textDim} />
-            <span style={{ fontSize: 12.5, color: C.textDim }}>Lägg till progressbild för {DAY_LABELS[selectedDay]}</span>
-            <span style={{ fontSize: 11, color: C.textFaint }}>Helt valfritt — dagligen, veckovis, eller aldrig</span>
+            <span style={{ fontSize: 12.5, color: C.textDim }}>{tr("Lägg till progressbild för")} {DAY_LABELS[selectedDay]}</span>
+            <span style={{ fontSize: 11, color: C.textFaint }}>{tr("Helt valfritt — dagligen, veckovis, eller aldrig")}</span>
           </>
         )}
       </label>
@@ -3576,7 +4101,7 @@ function BarcodeScanner({ onCode, onCancel, loading }) {
           const detector = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
           let timer = null;
           stop = () => { clearTimeout(timer); stream.getTracks().forEach((t) => t.stop()); };
-          setStatus("Rikta kameran mot streckkoden");
+          setStatus(tr("Rikta kameran mot streckkoden"));
           const tick = async () => {
             if (cancelled || doneRef.current) return;
             try {
@@ -3597,10 +4122,10 @@ function BarcodeScanner({ onCode, onCancel, loading }) {
           );
           if (cancelled) { controls.stop(); return; }
           stop = () => controls.stop();
-          setStatus("Rikta kameran mot streckkoden");
+          setStatus(tr("Rikta kameran mot streckkoden"));
         }
       } catch (e) {
-        setStatus("Kunde inte starta kameran. Tillåt kameran i webbläsaren, eller skriv streckkoden här nedanför.");
+        setStatus(tr("Kunde inte starta kameran. Tillåt kameran i webbläsaren, eller skriv streckkoden här nedanför."));
       }
     })();
     return () => { cancelled = true; if (stop) stop(); };
@@ -3616,19 +4141,19 @@ function BarcodeScanner({ onCode, onCancel, loading }) {
         }} />
       </div>
       <p style={{ fontSize: 12.5, color: C.textDim, textAlign: "center", marginBottom: 18 }}>
-        {loading ? "Hämtar produkten…" : status}
+        {loading ? tr("Hämtar produkten…") : status}
       </p>
-      <label style={onbLabel}>Eller skriv siffrorna under streckkoden</label>
+      <label style={onbLabel}>{tr("Eller skriv siffrorna under streckkoden")}</label>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <input
-          value={typed} inputMode="numeric" placeholder="t.ex. 7310500088853"
+          value={typed} inputMode="numeric" placeholder={tr("t.ex. 7310500088853")}
           onChange={(e) => setTyped(e.target.value.replace(/\D/g, ""))}
           onKeyDown={(e) => e.key === "Enter" && typed.length >= 8 && submit(typed)}
           style={{ ...onbInput, flex: 1 }}
         />
-        <button onClick={() => typed.length >= 8 && submit(typed)} style={{ ...primaryBtn, opacity: typed.length >= 8 ? 1 : 0.5 }}>Sök</button>
+        <button onClick={() => typed.length >= 8 && submit(typed)} style={{ ...primaryBtn, opacity: typed.length >= 8 ? 1 : 0.5 }}>{tr("Sök")}</button>
       </div>
-      <button onClick={onCancel} style={ghostBtn}>Tillbaka</button>
+      <button onClick={onCancel} style={ghostBtn}>{tr("Tillbaka")}</button>
     </div>
   );
 }
@@ -3642,7 +4167,7 @@ function gramsFor(amount, unit, name) {
 function formatLogQty(entry) {
   if (entry.amount && entry.unit && entry.unit !== "g") {
     const n = Math.round(entry.amount * 10) / 10;
-    return `${n.toLocaleString("sv-SE")} ${UNIT_LABELS[entry.unit] || entry.unit}`;
+    return `${n.toLocaleString(LOCALE)} ${UNIT_LABELS[entry.unit] || entry.unit}`;
   }
   return Number(entry.grams) > 0 ? `${Math.round(entry.grams)} g` : null;
 }
@@ -3663,7 +4188,7 @@ function LogRow({ entry, onDelete, onScale }) {
     if (!(v > 0)) return;
     if (!hasGrams) { onScale(v, null); setOpen(false); return; } // äldre logg utan vikt: antal portioner
     const g = gramsFor(v, unit, entry.name);
-    if (!g) { setMsg(`Vet inte vad en "${entry.name}" väger — välj gram i stället.`); return; }
+    if (!g) { setMsg(trf("Vet inte vad en \"{0}\" väger — välj gram i stället.", entry.name)); return; }
     onScale(g / Number(entry.grams), Math.round(g), v, unit);
     setOpen(false);
   }
@@ -3678,22 +4203,22 @@ function LogRow({ entry, onDelete, onScale }) {
         }}
       >
         <span style={{ fontSize: 13.5 }}>
-          {entry.name || "Måltid"}
+          {entry.name || tr("Måltid")}
           {qty && <span style={{ color: C.textFaint, fontSize: 11.5 }}> · {qty}</span>}
         </span>
-        <span style={{ ...mono, fontSize: 12.5, color: C.accent }}>{Math.round(entry.kcal || 0)} kcal</span>
+        <span style={{ ...mono, fontSize: 12.5, color: C.accent }}>{Math.round(entry.kcal || 0)} {tr("kcal")}</span>
       </button>
       {open && (
         <div className="fade-up" style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: C.textDim, flex: 1 }}>{hasGrams ? "Mängd" : "Antal portioner"}</span>
+            <span style={{ fontSize: 12, color: C.textDim, flex: 1 }}>{hasGrams ? tr("Mängd") : tr("Antal portioner")}</span>
             <input
               value={value} inputMode="decimal"
               onChange={(ev) => setValue(ev.target.value.replace(/[^0-9.,]/g, ""))}
               onKeyDown={(ev) => ev.key === "Enter" && save()}
               style={{ ...onbInput, width: 90, padding: "8px 10px", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace" }}
             />
-            <button onClick={save} style={{ ...primaryBtn, padding: "8px 14px", fontSize: 12.5 }}>Spara</button>
+            <button onClick={save} style={{ ...primaryBtn, padding: "8px 14px", fontSize: 12.5 }}>{tr("Spara")}</button>
           </div>
           {hasGrams && (
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -3715,13 +4240,13 @@ function LogRow({ entry, onDelete, onScale }) {
           {msg && <p style={{ fontSize: 11.5, color: C.estimate }}>{msg}</p>}
           {!confirmDel ? (
             <button onClick={() => setConfirmDel(true)} style={{ ...ghostBtn, color: "#E08F8F", padding: "8px 12px" }}>
-              <Trash2 size={13} /> Ta bort
+              <Trash2 size={13} /> {tr("Ta bort")}
             </button>
           ) : (
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setConfirmDel(false)} style={{ ...ghostBtn, flex: 1, padding: "8px 12px" }}>Avbryt</button>
+              <button onClick={() => setConfirmDel(false)} style={{ ...ghostBtn, flex: 1, padding: "8px 12px" }}>{tr("Avbryt")}</button>
               <button onClick={onDelete} style={{ ...primaryBtn, flex: 1, padding: "8px 12px", background: "#E08F8F", boxShadow: "none", color: "#2a0f0f" }}>
-                Ja, ta bort
+                {tr("Ja, ta bort")}
               </button>
             </div>
           )}
@@ -3732,7 +4257,7 @@ function LogRow({ entry, onDelete, onScale }) {
 }
 
 function CandidateButton({ c, onPick, disabled }) {
-  const src = c.source === "Open Food Facts" ? `Märkesvara${c.brand ? ` · ${c.brand}` : ""}` : null;
+  const src = c.source === "Open Food Facts" ? `${tr("Märkesvara")}${c.brand ? ` · ${c.brand}` : ""}` : null;
   return (
     <button
       onClick={onPick} disabled={disabled}
@@ -3744,12 +4269,12 @@ function CandidateButton({ c, onPick, disabled }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13.5, marginBottom: 3 }}>{c.name}</div>
         <div style={{ fontSize: 10.5, color: C.textFaint }}>
-          {src ? `${src} · ` : ""}P {Math.round(c.per100.protein_g)}g · K {Math.round(c.per100.carbs_g)}g · F {Math.round(c.per100.fat_g)}g
-          {c.remembered ? <span style={{ color: C.estimate }}> · ditt val</span> : null}
-          {isUncookedWeight(c.name) ? <span style={{ color: C.estimate }}> · okokt vikt</span> : null}
+          {src ? `${src} · ` : ""}{tr("P")} {Math.round(c.per100.protein_g)}{tr("g · K")} {Math.round(c.per100.carbs_g)}{tr("g · F")} {Math.round(c.per100.fat_g)}{tr("g")}
+          {c.remembered ? <span style={{ color: C.estimate }}> {tr("· ditt val")}</span> : null}
+          {isUncookedWeight(c.name) ? <span style={{ color: C.estimate }}> {tr("· okokt vikt")}</span> : null}
         </div>
       </div>
-      <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(c.per100.kcal)} kcal</span>
+      <span style={{ ...mono, fontSize: 12.5, color: C.accent, flexShrink: 0 }}>{Math.round(c.per100.kcal)} {tr("kcal")}</span>
     </button>
   );
 }
@@ -3781,11 +4306,11 @@ function Dashboard({ dailyLog, targets }) {
   const toggle = (key) => setOpenInfo((cur) => (cur === key ? null : key));
 
   const pages = [
-    { key: "macros", label: "Makros" },
-    { key: "vitamins", label: "Vitaminer" },
-    { key: "minerals", label: "Mineraler" },
-    { key: "bonus", label: "Bra ämnen" },
-    { key: "ranking", label: "Hälsoranking" },
+    { key: "macros", label: tr("Makros") },
+    { key: "vitamins", label: tr("Vitaminer") },
+    { key: "minerals", label: tr("Mineraler") },
+    { key: "bonus", label: tr("Bra ämnen") },
+    { key: "ranking", label: tr("Hälsoranking") },
   ];
 
   function goToPage(i) {
@@ -3805,7 +4330,7 @@ function Dashboard({ dailyLog, targets }) {
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px 0" }}>
       {dailyLog.length === 0 && (
         <p style={{ fontSize: 12, color: C.textFaint, textAlign: "center", marginBottom: 16 }}>
-          Inget loggat idag än — här är hur det ser ut tills du loggar något.
+          {tr("Inget loggat idag än — här är hur det ser ut tills du loggar något.")}
         </p>
       )}
 
@@ -3814,18 +4339,18 @@ function Dashboard({ dailyLog, targets }) {
           {/* macros */}
           {pageIdx === 0 && (
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
-              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.accent }}>Makros idag</p>
-              <BarRow label="Kalorier" value={Math.round(totals.kcal)} max={targets.kcal} unit="kcal" sublabel={targets.kcal} color={C.accent} colorDim={C.accentDim} />
-              <BarRow label="Protein" value={Math.round(totals.protein_g)} max={targets.protein_g} unit="g" sublabel={targets.protein_g} color={C.accent} colorDim={C.accentDim} />
-              <BarRow label="Kolhydrater" value={Math.round(totals.carbs_g)} max={targets.carbs_g} unit="g" sublabel={targets.carbs_g} color={C.accent} colorDim={C.accentDim} />
-              <BarRow label="Fett" value={Math.round(totals.fat_g)} max={targets.fat_g} unit="g" sublabel={targets.fat_g} color={C.accent} colorDim={C.accentDim} />
+              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.accent }}>{tr("Makros idag")}</p>
+              <BarRow label={tr("Kalorier")} value={Math.round(totals.kcal)} max={targets.kcal} unit="kcal" sublabel={targets.kcal} color={C.accent} colorDim={C.accentDim} />
+              <BarRow label={tr("Protein")} value={Math.round(totals.protein_g)} max={targets.protein_g} unit="g" sublabel={targets.protein_g} color={C.accent} colorDim={C.accentDim} />
+              <BarRow label={tr("Kolhydrater")} value={Math.round(totals.carbs_g)} max={targets.carbs_g} unit="g" sublabel={targets.carbs_g} color={C.accent} colorDim={C.accentDim} />
+              <BarRow label={tr("Fett")} value={Math.round(totals.fat_g)} max={targets.fat_g} unit="g" sublabel={targets.fat_g} color={C.accent} colorDim={C.accentDim} />
             </div>
           )}
 
           {/* vitamins — full canonical list, always shown, even at 0 */}
           {pageIdx === 1 && (
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
-              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.vitamin }}>Vitaminer idag</p>
+              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.vitamin }}>{tr("Vitaminer idag")}</p>
               {VITAMINS.filter((v) => dailyLog.length === 0 || microHasData(dailyLog, v.key)).map((v) => (
                 <MicroRow
                   key={v.key} def={v} amount={vitaminTotals[v.key] || 0}
@@ -3836,7 +4361,7 @@ function Dashboard({ dailyLog, targets }) {
               ))}
               {dailyLog.length > 0 && VITAMINS.some((d) => !microHasData(dailyLog, d.key)) && (
                 <p style={{ fontSize: 11, color: C.textFaint, marginTop: 10 }}>
-                  {VITAMINS.filter((d) => !microHasData(dailyLog, d.key)).map((d) => d.name).join(", ")} visas inte — de finns inte uppmätta för det du ätit idag.
+                  {VITAMINS.filter((d) => !microHasData(dailyLog, d.key)).map((d) => d.name).join(", ")} {tr("visas inte — de finns inte uppmätta för det du ätit idag.")}
                 </p>
               )}
             </div>
@@ -3845,7 +4370,7 @@ function Dashboard({ dailyLog, targets }) {
           {/* minerals — full canonical list, always shown, even at 0 */}
           {pageIdx === 2 && (
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
-              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.mineral }}>Mineraler idag</p>
+              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 18, color: C.mineral }}>{tr("Mineraler idag")}</p>
               {MINERALS.filter((m) => dailyLog.length === 0 || microHasData(dailyLog, m.key)).map((m) => (
                 <MicroRow
                   key={m.key} def={m} amount={mineralTotals[m.key] || 0}
@@ -3856,7 +4381,7 @@ function Dashboard({ dailyLog, targets }) {
               ))}
               {dailyLog.length > 0 && MINERALS.some((d) => !microHasData(dailyLog, d.key)) && (
                 <p style={{ fontSize: 11, color: C.textFaint, marginTop: 10 }}>
-                  {MINERALS.filter((d) => !microHasData(dailyLog, d.key)).map((d) => d.name).join(", ")} visas inte — de finns inte uppmätta för det du ätit idag.
+                  {MINERALS.filter((d) => !microHasData(dailyLog, d.key)).map((d) => d.name).join(", ")} {tr("visas inte — de finns inte uppmätta för det du ätit idag.")}
                 </p>
               )}
             </div>
@@ -3865,11 +4390,11 @@ function Dashboard({ dailyLog, targets }) {
           {/* bonus — open-ended, only what's actually been eaten */}
           {pageIdx === 3 && (
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
-              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 6, color: C.bonus }}>Bra ämnen idag</p>
+              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 6, color: C.bonus }}>{tr("Bra ämnen idag")}</p>
               <p style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 16 }}>
-                Visas bara här om du faktiskt fått i dig något av det. Uppmätta ämnen visas med mängd; övriga med en ungefärlig nivå (låg–mycket hög) utifrån typiska halter i livsmedlet.
+                {tr("Visas bara här om du faktiskt fått i dig något av det. Uppmätta ämnen visas med mängd; övriga med en ungefärlig nivå (låg–mycket hög) utifrån typiska halter i livsmedlet.")}
               </p>
-              {bonusList.length === 0 && <p style={{ fontSize: 12.5, color: C.textFaint }}>Inget upptäckt än idag.</p>}
+              {bonusList.length === 0 && <p style={{ fontSize: 12.5, color: C.textFaint }}>{tr("Inget upptäckt än idag.")}</p>}
               {bonusList.map((b) => {
                 const open = openInfo === `bonus-${b.name}`;
                 return (
@@ -3886,11 +4411,11 @@ function Dashboard({ dailyLog, targets }) {
                               cursor: "pointer", padding: 0, flexShrink: 0,
                             }}
                           >
-                            i
+                            {tr("i")}
                           </button>
                         )}
                       </div>
-                      <span style={{ ...mono, fontSize: 12, color: C.bonus }}>{b.amount || "spårmängd"}</span>
+                      <span style={{ ...mono, fontSize: 12, color: C.bonus }}>{b.amount || tr("spårmängd")}</span>
                     </div>
                     {open && (
                       <p className="fade-up" style={{ fontSize: 11.5, color: C.textFaint, marginTop: 6 }}>
@@ -3906,9 +4431,9 @@ function Dashboard({ dailyLog, targets }) {
           {/* health ranking — how today's food supports different areas of the body */}
           {pageIdx === 4 && (
             <div className="glass-card" style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 22 }}>
-              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Hälsoranking idag</p>
+              <p style={{ ...display, fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{tr("Hälsoranking idag")}</p>
               <p style={{ fontSize: 11, color: C.textFaint, marginBottom: 16 }}>
-                Uppskattat stöd från det du ätit — inte ett medicinskt mått.
+                {tr("Uppskattat stöd från det du ätit — inte ett medicinskt mått.")}
               </p>
               {HEALTH_CATEGORIES.map((cat) => {
                 const score = calcHealthScore(cat, dailyLog, targets);
@@ -3928,7 +4453,7 @@ function Dashboard({ dailyLog, targets }) {
                             cursor: "pointer", padding: 0, flexShrink: 0,
                           }}
                         >
-                          i
+                          {tr("i")}
                         </button>
                       </div>
                       <span style={{ ...mono, fontSize: 13, fontWeight: 600, color: cat.color }}>{score}</span>
@@ -3962,7 +4487,7 @@ function Dashboard({ dailyLog, targets }) {
             ))}
           </div>
           <p style={{ textAlign: "center", fontSize: 11.5, color: C.textFaint, marginBottom: 8 }}>
-            {pages[pageIdx].label} — svep för fler
+            {pages[pageIdx].label} {tr("— svep för fler")}
           </p>
     </div>
   );
