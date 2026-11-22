@@ -64,6 +64,17 @@ function rerank(list, query) {
     .map((x) => x.c);
 }
 
+// engelska plural → singular, så att "eggs" hittar "Egg, boiled" och "tomatoes" hittar "Tomato"
+function singularize(query) {
+  return query.split(/\s+/).map((w) => {
+    if (w.length <= 3) return w;
+    if (/ies$/i.test(w)) return w.slice(0, -3) + "y";
+    if (/(sh|ch|x|ss|o)es$/i.test(w)) return w.slice(0, -2);
+    if (/s$/i.test(w) && !/ss$/i.test(w)) return w.slice(0, -1);
+    return w;
+  }).join(" ");
+}
+
 // ---------- egen databas (Supabase) ----------
 async function searchDatabase(query, country, lang) {
   const key = process.env.SUPABASE_SECRET_KEY || SUPABASE_PUBLISHABLE_KEY;
@@ -172,11 +183,16 @@ export default async function handler(req, res) {
     if (query.length < 2) return res.status(200).json({ results: [] });
     const country = body.country ? String(body.country).toUpperCase().slice(0, 5) : null;
 
-    const [db, off] = await Promise.all([
-      searchDatabase(query, country, lang).catch((e) => { console.error("[food-lookup] databasfel:", e.message); return []; }),
+    const single = lang === "en" ? singularize(query) : query;
+    const dbErr = (e) => { console.error("[food-lookup] databasfel:", e.message); return []; };
+    const [db, dbSingle, off] = await Promise.all([
+      searchDatabase(query, country, lang).catch(dbErr),
+      single !== query ? searchDatabase(single, country, lang).catch(dbErr) : Promise.resolve([]),
       searchOpenFoodFacts(query, country, lang),
     ]);
-    const results = [...rerank(db, query).slice(0, SHOW_LIMIT), ...off];
+    const seen = new Set();
+    const merged = [...dbSingle, ...db].filter((c) => (seen.has(c.id) ? false : seen.add(c.id)));
+    const results = [...rerank(merged, single).slice(0, SHOW_LIMIT), ...off];
     return res.status(200).json({ results });
   } catch (e) {
     console.error("[food-lookup] fel:", e.message);
