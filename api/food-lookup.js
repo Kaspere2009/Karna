@@ -31,13 +31,13 @@ async function fetchWithTimeout(url, options = {}, ms = 4000) {
 const num = (v) => (typeof v === "number" && isFinite(v) ? v : Number(v) || 0);
 const norm = (s) => String(s || "").toLowerCase().normalize("NFC").trim();
 
-function rowToCandidate(r) {
+function rowToCandidate(r, lang) {
   const extra = r.extra_micros && Object.keys(r.extra_micros).length ? r.extra_micros : null;
   const micros = { ...(extra || {}), ...(r.micros || {}) };
   return {
     id: r.id,
     source: (SOURCE_LABELS[r.source] || r.source) + (extra ? ", kompletterat med USDA FoodData Central" : ""),
-    name: r.name_sv || r.name_en,
+    name: lang === "en" ? r.name_en || r.name_sv : r.name_sv || r.name_en,
     per100: {
       kcal: num(r.kcal), protein_g: num(r.protein_g), carbs_g: num(r.carbs_g), sugar_g: num(r.sugar_g),
       fiber_g: num(r.fiber_g), fat_g: num(r.fat_g), satfat_g: num(r.satfat_g), transfat_g: num(r.transfat_g),
@@ -65,7 +65,7 @@ function rerank(list, query) {
 }
 
 // ---------- egen databas (Supabase) ----------
-async function searchDatabase(query, country) {
+async function searchDatabase(query, country, lang) {
   const key = process.env.SUPABASE_SECRET_KEY || SUPABASE_PUBLISHABLE_KEY;
   const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/search_foods`, {
     method: "POST",
@@ -77,7 +77,7 @@ async function searchDatabase(query, country) {
     return [];
   }
   const rows = await res.json();
-  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.id && (r.name_sv || r.name_en)).map(rowToCandidate);
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.id && (r.name_sv || r.name_en)).map((r) => rowToCandidate(r, lang));
 }
 
 // ---------- Open Food Facts (märkesvaror) ----------
@@ -88,12 +88,12 @@ const OFF_MICROS = [
   ["vitamin-c_100g", "vit_c", 1000], ["vitamin-d_100g", "vit_d", 1e6], ["vitamin-a_100g", "vit_a", 1e6],
   ["vitamin-b12_100g", "b12", 1e6], ["iodine_100g", "iodine", 1e6],
 ];
-function offToCandidate(p) {
+function offToCandidate(p, lang) {
   const n = p && p.nutriments;
   if (!n) return null;
   const kcal = n["energy-kcal_100g"] ?? (n["energy_100g"] ? n["energy_100g"] / 4.184 : undefined);
   if (typeof kcal !== "number" && isNaN(Number(kcal))) return null;
-  const name = String(p.product_name_sv || p.product_name || p.generic_name || "").trim();
+  const name = String((lang === "en" ? p.product_name_en : p.product_name_sv) || p.product_name || p.generic_name || "").trim();
   if (!name) return null;
   const micros = {};
   for (const [field, key, factor] of OFF_MICROS) {
@@ -115,9 +115,9 @@ function offToCandidate(p) {
   };
 }
 
-const OFF_FIELDS = "code,product_name,product_name_sv,generic_name,brands,nutriments,serving_quantity";
+const OFF_FIELDS = "code,product_name,product_name_sv,product_name_en,generic_name,brands,nutriments,serving_quantity";
 
-async function searchOpenFoodFacts(query, country) {
+async function searchOpenFoodFacts(query, country, lang) {
   const params = new URLSearchParams({
     search_terms: query, search_simple: "1", action: "process", json: "1",
     page_size: String(OFF_LIMIT * 2), fields: OFF_FIELDS,
@@ -132,13 +132,13 @@ async function searchOpenFoodFacts(query, country) {
     const res = await fetchWithTimeout(`https://world.openfoodfacts.org/cgi/search.pl?${params}`, { headers: OFF_HEADERS }, 3500);
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.products || []).map(offToCandidate).filter(Boolean).slice(0, OFF_LIMIT);
+    return (data.products || []).map((p) => offToCandidate(p, lang)).filter(Boolean).slice(0, OFF_LIMIT);
   } catch (e) {
     return []; // Open Food Facts är långsam ibland — då visas bara databasträffarna
   }
 }
 
-async function lookupBarcode(code) {
+async function lookupBarcode(code, lang) {
   const clean = String(code || "").replace(/\D/g, "");
   if (!clean) return null;
   try {
@@ -148,7 +148,7 @@ async function lookupBarcode(code) {
     if (!res.ok) return null;
     const data = await res.json();
     if (data.status !== 1 || !data.product) return null;
-    return offToCandidate({ ...data.product, code: data.product.code || clean });
+    return offToCandidate({ ...data.product, code: data.product.code || clean }, lang);
   } catch (e) {
     return null;
   }
@@ -163,8 +163,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    const lang = body.lang === "en" ? "en" : "sv";
     if (body.barcode) {
-      return res.status(200).json({ product: await lookupBarcode(body.barcode) });
+      return res.status(200).json({ product: await lookupBarcode(body.barcode, lang) });
     }
 
     const query = String(body.query || "").trim().slice(0, 100);
@@ -172,8 +173,8 @@ export default async function handler(req, res) {
     const country = body.country ? String(body.country).toUpperCase().slice(0, 5) : null;
 
     const [db, off] = await Promise.all([
-      searchDatabase(query, country).catch((e) => { console.error("[food-lookup] databasfel:", e.message); return []; }),
-      searchOpenFoodFacts(query, country),
+      searchDatabase(query, country, lang).catch((e) => { console.error("[food-lookup] databasfel:", e.message); return []; }),
+      searchOpenFoodFacts(query, country, lang),
     ]);
     const results = [...rerank(db, query).slice(0, SHOW_LIMIT), ...off];
     return res.status(200).json({ results });
