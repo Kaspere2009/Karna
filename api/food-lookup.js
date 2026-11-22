@@ -6,8 +6,8 @@
 const SUPABASE_URL = "https://clwdczzwsvowsfpaijjm.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DJZHyFLJcCW3Ii4HlXgjOw_rbEZkh4s";
 const OFF_HEADERS = { "User-Agent": "DOT/1.0 (karna-pied.vercel.app)", Accept: "application/json" };
-const DB_LIMIT = 30;   // hämtas från databasen, sorteras om, visas högst 15
-const SHOW_LIMIT = 15;
+const DB_LIMIT = 60;   // hämtas från databasen, sorteras om, visas högst 25
+const SHOW_LIMIT = 25;
 const OFF_LIMIT = 5;
 
 const SOURCE_LABELS = { slv: "Livsmedelsverkets livsmedelsdatabas", usda: "USDA FoodData Central" };
@@ -57,9 +57,12 @@ function rankScore(name, query) {
   if (words.includes(q)) return 2;
   return 3;
 }
+// ovanliga former (torkat, pulver, fryst, barnmat …) hamnar sist inom sin grupp, om man inte sökt på dem
+const ODD_FORMS = /\b(dried|dry|powder|powdered|frozen|dehydrated|substitute|babyfood|baby food|mix|torkad|torkat|pulver|fryst|barnmat)\b/i;
 function rerank(list, query) {
+  const askedOdd = ODD_FORMS.test(query);
   return list
-    .map((c, i) => ({ c, i, s: rankScore(c.name, query) }))
+    .map((c, i) => ({ c, i, s: rankScore(c.name, query) + (!askedOdd && ODD_FORMS.test(c.name) ? 0.5 : 0) }))
     .sort((a, b) => a.s - b.s || a.i - b.i)
     .map((x) => x.c);
 }
