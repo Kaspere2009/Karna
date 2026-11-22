@@ -872,7 +872,10 @@ async function aiPickCandidate(query, candidates) {
       "Regler: 1) Om användaren inte skrivit okokt/torr/rå: välj tillagad variant (kokt ris/pasta, kokt ägg, stekt/kokt kött). " +
       "2) Välj ALDRIG barnmat, konserv, pulver, fryst färdigrätt eller kylvara om användaren inte nämnt det — välj hellre hemlagad eller den vanligaste neutrala varianten. " +
       "3) Välj ALDRIG eko-variant eller märkesvara om användaren inte nämnt det. " +
-      "4) Raden ska vara samma livsmedel, inte en rätt som bara innehåller det (\"ägg\" är inte \"våffla m. ägg\").";
+      "4) Raden ska vara samma livsmedel, inte en rätt som bara innehåller det (\"ägg\" är inte \"våffla m. ägg\", \"oatmeal\" är inte \"oatmeal cookies\"). " +
+      "5) Skrev användaren bara ett enkelt livsmedel, välj den enklaste vanliga formen: \"ägg\"/\"eggs\" = kokt ägg (inte äggröra eller omelett), " +
+      "\"gröt\"/\"oatmeal\" = havregrynsgröt kokt på vatten, \"kyckling\" = kycklingfilé. Rätter som äggröra, pannkaka eller sallad bara om de nämns. " +
+      "Raderna kan vara på svenska eller engelska — det spelar ingen roll vilket språk användaren skrev på.";
     const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `Användaren skrev: "${query}"\n\nRader:\n${list}` }], system, 150));
     const i = Number(parsed.index);
     return Number.isInteger(i) && i >= 0 && i < candidates.length ? candidates[i] : null;
@@ -1382,6 +1385,7 @@ export default function DotApp() {
     return () => clearTimeout(t);
   }, [justLogged]);
   const [ownValuesPick, setOwnValuesPick] = useState(false); // listan används för att fylla i det du inte angett
+  const [pendingChoice, setPendingChoice] = useState(null); // AI:ns val, sparas i minnet när du loggar
   const [photoItems, setPhotoItems] = useState([]); // livsmedel som AI såg på bilden, med värden från databasen
   const [photoMissing, setPhotoMissing] = useState([]);
   useEffect(() => { aiAccessToken = session?.access_token || null; }, [session]);
@@ -1746,8 +1750,24 @@ export default function DotApp() {
     if (remembered.length > 0) { setLoading(false); await finishManual(merged[0], ctx); return; }
     // annars väljer AI den rad som passar bäst. Osäker AI (eller ingen AI) → du väljer själv.
     const pick = await aiPickCandidate(original, merged);
+    if (pick) { setLoading(false); await finishManual(pick, ctx); return; }
+    // inget passade (t.ex. "oatmeal" gav bara havrekakor) → prova AI:ns andra sökord, t.ex. det svenska namnet
+    if (!altQueries.length) {
+      const ai = await aiInterpret(original);
+      altQueries = ai ? [ai.name, ...(ai.alternatives || [])] : [];
+    }
+    let extra = [];
+    for (const q of [...new Set(altQueries)].filter((q) => q && q.toLowerCase() !== name.toLowerCase()).slice(0, 3)) {
+      const alt = (await lookupFoodDatabase(q, profileInfo.country)).results || [];
+      if (!alt.length) continue;
+      const altPick = await aiPickCandidate(original, alt);
+      if (altPick) { setCandidates(alt); setLoading(false); await finishManual(altPick, ctx); return; }
+      extra = [...extra, ...alt];
+    }
     setLoading(false);
-    if (pick) { await finishManual(pick, ctx); return; }
+    // fortfarande osäker → du väljer själv bland alla träffar
+    const seen = new Set();
+    setCandidates([...extra, ...merged].filter((c) => (seen.has(c.id) ? false : seen.add(c.id))));
     setMode("pick");
   }
 
@@ -1764,7 +1784,9 @@ export default function DotApp() {
       setMode("manual");
       return;
     }
-    if (hit) saveChoice(session, normalizeQuery(name), hit);
+    // ditt eget val i listan sparas direkt; AI:ns val sparas först när du trycker "Bekräfta & logga"
+    if (hit && !ctx) saveChoice(session, normalizeQuery(name), hit);
+    setPendingChoice(hit && ctx ? { query: normalizeQuery(name), hit } : null);
     setResult(res);
     setMode("result");
     if (res.microsMissing) setError(tr("Vitaminer och mineraler finns inte uppmätta för den här träffen, så de räknas inte med."));
@@ -2660,6 +2682,7 @@ export default function DotApp() {
                   onClick={() => {
                     if (confirmed) return;
                     setConfirmed(true);
+                    if (pendingChoice) { saveChoice(session, pendingChoice.query, pendingChoice.hit); setPendingChoice(null); }
                     addLogEntry({
                       name: foodName, ...result, grams: result.estimatedGrams ?? null,
                       amount: displayQty ? displayQty.amount : Number(weight) || null,
