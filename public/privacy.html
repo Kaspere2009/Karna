@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy – DOT</title>
+<style>
+  :root { --bg: #0e1913; --card: #16231b; --text: #f1f4ee; --dim: #b9c4bb; --faint: #8a988d; --accent: #8fd9a8; --warn: #f2c063; --border: #2c3a30; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 40px 18px 64px; }
+  .logo { font-weight: 700; letter-spacing: .04em; font-size: 20px; margin-bottom: 28px; }
+  .logo span { color: var(--accent); }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 34px 0 8px; color: var(--accent); }
+  p, li { color: var(--dim); }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  strong { color: var(--text); }
+  a { color: var(--accent); }
+  .meta { color: var(--faint); font-size: 13px; margin-bottom: 26px; }
+  .box { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 14px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--dim); }
+  th { color: var(--text); font-weight: 600; }
+  .todo { background: rgba(242,192,99,.15); color: var(--warn); border-radius: 4px; padding: 0 4px; }
+  @media (max-width: 560px) { table, thead, tbody, tr, th, td { display: block; } thead { display: none; } td { border: none; padding: 2px 0; } tr { border-bottom: 1px solid var(--border); padding: 10px 0; } td:first-child { color: var(--text); font-weight: 600; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo">D<span>●</span>T</div>
+  <h1>Privacy Policy</h1>
+  <p class="meta">Last updated: 22 November 2026</p>
+
+  <div class="box">
+    <p style="margin:0"><strong>Short version:</strong> DOT stores what you log so you can see your diet over time. We never sell your data and show no ads. Text and photos you log are sent to an AI service to be interpreted. You can delete your account and all your data whenever you want.</p>
+  </div>
+
+  <h2>1. Who is responsible for your data?</h2>
+  <p>The data controller is Kasper Estigarribia, Västerås, Sweden, who runs DOT. Contact: <span class="todo">[contact email to be added]</span>.</p>
+
+  <h2>2. What data is stored?</h2>
+  <ul>
+    <li><strong>Account:</strong> email address and password (the password is stored encrypted). If you sign in with Google, we receive your email address from Google.</li>
+    <li><strong>Profile:</strong> age, height, weight, sex, activity level, goals, country and chosen units. Used to calculate your calorie and nutrient needs.</li>
+    <li><strong>What you log:</strong> food and drink, amounts, time, saved meals and which foods you picked for different searches (so the app remembers your choices).</li>
+    <li><strong>Weight and progress photos:</strong> if you choose to add them.</li>
+    <li><strong>Sign-in in your browser:</strong> a sign-in token and your language choice are stored in the browser's local storage so you stay signed in. We use no tracking cookies and no advertising or analytics tracking.</li>
+  </ul>
+  <p>Some of this data (weight, diet, goals) counts as <strong>health data</strong>, which is sensitive personal data under the General Data Protection Regulation (GDPR). We only process it with your explicit consent.</p>
+
+  <h2>3. Why, and on what legal basis?</h2>
+  <table>
+    <thead><tr><th>Purpose</th><th>Legal basis</th></tr></thead>
+    <tbody>
+      <tr><td>Give you an account and store your logs</td><td>Contract (to provide the service)</td></tr>
+      <tr><td>Process health data (diet, weight, goals, photos)</td><td>Your explicit consent, which you can withdraw by deleting your account</td></tr>
+      <tr><td>Interpret free text and photos with AI</td><td>Your consent – you choose whether to log with free text or photos</td></tr>
+      <tr><td>Troubleshoot and protect the service</td><td>Legitimate interest (short-lived technical logs)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. AI and nutrition values</h2>
+  <p>When you log with free text (e.g. “a glass of milk”) or a photo, the text or image is sent to Anthropic, which provides the AI model Claude. The AI only interprets <em>what</em> you ate and roughly <em>how much</em>. All nutrition values come from food databases (the Swedish Food Agency, USDA and Open Food Facts), never from the AI. Your email address and profile are not sent to the AI service. Under Anthropic's terms for API customers, the data is not used to train their models.</p>
+
+  <h2>5. Which services process the data for us?</h2>
+  <p>We use the following providers (data processors). They may only process the data to run DOT.</p>
+  <table>
+    <thead><tr><th>Provider</th><th>What they do</th></tr></thead>
+    <tbody>
+      <tr><td>Supabase</td><td>Database, sign-in and storage of progress photos</td></tr>
+      <tr><td>Vercel</td><td>Runs the website and server functions</td></tr>
+      <tr><td>Anthropic</td><td>AI interpretation of text and photos you log</td></tr>
+      <tr><td>Google</td><td>Sign-in with Google (if you choose it) and web fonts</td></tr>
+      <tr><td>Open Food Facts</td><td>Branded product and barcode lookups. Only the search term or barcode is sent, no data about you.</td></tr>
+    </tbody>
+  </table>
+  <p>The database and your progress photos are stored with Supabase in London, United Kingdom. The EU has decided that the UK provides a level of protection equivalent to the GDPR.</p>
+  <p>Some providers are US companies, so data may also be transferred to the United States. Transfers use the safeguards the GDPR requires, such as the European Commission's standard contractual clauses or the EU–US Data Privacy Framework.</p>
+
+  <h2>6. How long is the data kept?</h2>
+  <p>For as long as you have an account. If you delete your account (Settings → Delete account), all your data is removed immediately: logs, profile, meals, weight, progress photos and the sign-in account itself. Short-lived technical logs at our providers are cleared automatically after a limited time.</p>
+
+  <h2>7. Your rights</h2>
+  <ul>
+    <li><strong>Access your data</strong> and get a copy of it (also in a machine-readable format).</li>
+    <li><strong>Correct</strong> inaccurate data – most of it you can change yourself in the app.</li>
+    <li><strong>Delete</strong> everything – directly in the app.</li>
+    <li><strong>Withdraw your consent</strong> at any time.</li>
+    <li><strong>Restrict or object</strong> to certain processing.</li>
+    <li><strong>Complain</strong> to the Swedish Authority for Privacy Protection (IMY), <a href="https://www.imy.se/en/">imy.se</a>, or the data protection authority where you live.</li>
+  </ul>
+  <p>Contact us at <span class="todo">[contact email]</span> to exercise your rights. We reply within one month.</p>
+
+  <h2>8. Age</h2>
+  <p>DOT is for people aged <strong>16 or older</strong>.</p>
+
+  <h2>9. Not medical advice</h2>
+  <p>DOT provides nutrition information based on public food databases. It is not medical advice. If you have an illness, an eating disorder or special dietary needs, talk to a healthcare professional.</p>
+
+  <h2>10. Changes</h2>
+  <p>If this policy changes, we update the date at the top. For major changes, we let you know in the app.</p>
+
+  <p style="margin-top:40px"><a href="/">← Back to DOT</a> · <a href="/integritet.html">På svenska</a></p>
+</main>
+</body>
+</html>
