@@ -861,29 +861,6 @@ async function aiInterpret(text) {
   }
 }
 
-// väljer den databasrad som bäst passar det användaren skrev — returnerar raden, eller null om osäker
-async function aiPickCandidate(query, candidates) {
-  if (!candidates || candidates.length < 2) return candidates?.[0] || null;
-  try {
-    const list = candidates.slice(0, 12).map((c, i) => `${i}: ${c.name} (${Math.round(c.per100.kcal)} kcal/100 g)`).join("\n");
-    const system =
-      "Du väljer vilken rad i en livsmedelsdatabas som bäst motsvarar det användaren åt. Svara ENDAST med JSON: " +
-      '{"index": number} där index är radens nummer. Välj ALLTID den mest sannolika raden — svara -1 bara om ingen rad alls är samma livsmedel. ' +
-      "Regler: 1) Om användaren inte skrivit okokt/torr/rå: välj tillagad variant (kokt ris/pasta, kokt ägg, stekt/kokt kött). " +
-      "2) Välj ALDRIG barnmat, konserv, pulver, fryst färdigrätt eller kylvara om användaren inte nämnt det — välj hellre hemlagad eller den vanligaste neutrala varianten. " +
-      "3) Välj ALDRIG eko-variant eller märkesvara om användaren inte nämnt det. " +
-      "4) Raden ska vara samma livsmedel, inte en rätt som bara innehåller det (\"ägg\" är inte \"våffla m. ägg\", \"oatmeal\" är inte \"oatmeal cookies\"). " +
-      "5) Skrev användaren bara ett enkelt livsmedel, välj den enklaste vanliga formen: \"ägg\"/\"eggs\" = kokt ägg (inte äggröra eller omelett), " +
-      "\"gröt\"/\"oatmeal\" = havregrynsgröt kokt på vatten, \"kyckling\" = kycklingfilé. Rätter som äggröra, pannkaka eller sallad bara om de nämns. " +
-      "Raderna kan vara på svenska eller engelska — det spelar ingen roll vilket språk användaren skrev på.";
-    const parsed = parseJsonLoose(await callClaude([{ role: "user", content: `Användaren skrev: "${query}"\n\nRader:\n${list}` }], system, 150));
-    const i = Number(parsed.index);
-    return Number.isInteger(i) && i >= 0 && i < candidates.length ? candidates[i] : null;
-  } catch (e) {
-    return null;
-  }
-}
-
 // hur många gram motsvarar t.ex. "1 dl havregryn"? (bara mängden — inga näringsvärden)
 async function aiEstimateGrams(name, amount, unit) {
   try {
@@ -1166,6 +1143,22 @@ async function lookupFoodDatabase(name, country) {
     return await res.json();
   } catch (e) {
     return { results: [] };
+  }
+}
+
+// låter servern välja rätt rad: först listan över vanliga livsmedel, sedan sökning + AI.
+// Samma kod som testsidan (/api/common-foods) kör, så testet visar exakt vad appen gör.
+async function resolveFoodRemote(name, original, country) {
+  try {
+    const res = await fetch("/api/food-lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: name, original, resolve: true, country: country && country !== "OTHER" ? country : null, lang: LANG }),
+    });
+    const data = await res.json();
+    return { results: data.results || [], pick: data.pick || null, via: data.via || null };
+  } catch (e) {
+    return { results: [], pick: null, via: null };
   }
 }
 
@@ -1640,7 +1633,6 @@ export default function DotApp() {
     let name = original;
     let amount = weight.trim();
     let unit = weightUnit;
-    let altQueries = [];
     let parsed = parseFoodInput(name);
     // vardagliga mått i texten ("ett glas mjölk", "en skål havregrynsgröt") → tolka utan AI först
     const vague = !parsed ? parseVagueAmount(name) : null;
@@ -1649,7 +1641,7 @@ export default function DotApp() {
       setLoading(true); setError("");
       const ai = await aiInterpret(name);
       setLoading(false);
-      if (ai) { parsed = ai; altQueries = ai.alternatives || []; }
+      if (ai) parsed = ai;
       // säger texten själv hur mycket ("ett glas") gäller det — annars din siffra i Mängd, om du fyllt i en
       if (vague) parsed = { ...(parsed || {}), ...vague, name: parsed?.name || vague.name };
       else if (parsed && amount) parsed = { ...parsed, amount: Number(amount.replace(",", ".")) || parsed.amount, unit };
@@ -1707,10 +1699,10 @@ export default function DotApp() {
 
     setLoading(true); setError(""); setCandidates([]);
     const query = normalizeQuery(name);
-    const [lookup, remembered] = await Promise.all([lookupFoodDatabase(name, profileInfo.country), loadChoices(session, query)]);
-    let merged = mergeCandidates(remembered, lookup.results);
+    const [resolved, remembered] = await Promise.all([resolveFoodRemote(name, original, profileInfo.country), loadChoices(session, query)]);
+    let merged = mergeCandidates(remembered, resolved.results);
     setSearchNote("");
-    // inga träffar på hela texten → prova kortare varianter: "arla feta ost" → "arla feta", "kiwi med skal" → "kiwi"
+    // inga träffar alls → prova kortare varianter: "arla feta ost" → "arla feta", "kiwi med skal" → "kiwi"
     const words = name.toLowerCase().split(/\s+/).filter(Boolean);
     if (merged.length === 0 && words.length > 1) {
       const STOP = new Set(["med", "utan", "och", "m", "u", "m.", "u.", "with", "without", "and", "i", "på", "en", "ett", "a"]);
@@ -1720,25 +1712,12 @@ export default function DotApp() {
       if (core.length && core.length < words.length) tries.push(core.join(" "));
       core.filter((w) => w.length >= 3).forEach((w) => tries.push(w));
       for (const q of [...new Set(tries)].filter((q) => q !== name.toLowerCase())) {
-        const shorter = await lookupFoodDatabase(q, profileInfo.country);
-        if ((shorter.results || []).length) {
+        const shorter = await resolveFoodRemote(q, original, profileInfo.country);
+        if (shorter.results.length) {
+          setSearchNote(trf("Inga träffar för \"{0}\" — visar träffar för \"{1}\".", name, q));
+          setCandidates(shorter.results);
+          if (shorter.pick) { setLoading(false); await finishManual(shorter.pick, { name, amount, unit }); return; }
           merged = shorter.results;
-          setSearchNote(trf("Inga träffar för \"{0}\" — visar träffar för \"{1}\".", name, q));
-          break;
-        }
-      }
-    }
-    // fortfarande inget → be AI om andra sökord (t.ex. rättstavat eller på engelska)
-    if (merged.length === 0) {
-      if (!altQueries.length) {
-        const ai = await aiInterpret(`${amount} ${UNIT_LABELS[unit] || unit} ${name}`);
-        altQueries = ai ? [ai.name, ...(ai.alternatives || [])] : [];
-      }
-      for (const q of [...new Set(altQueries)].filter((q) => q && q.toLowerCase() !== name.toLowerCase())) {
-        const alt = await lookupFoodDatabase(q, profileInfo.country);
-        if ((alt.results || []).length) {
-          merged = alt.results;
-          setSearchNote(trf("Inga träffar för \"{0}\" — visar träffar för \"{1}\".", name, q));
           break;
         }
       }
@@ -1748,26 +1727,10 @@ export default function DotApp() {
     if (merged.length === 0) { setLoading(false); await finishManual(null, ctx); return; }
     // minnet först: har du valt något för exakt den här sökningen förut → använd det direkt (du kan byta träff efteråt)
     if (remembered.length > 0) { setLoading(false); await finishManual(merged[0], ctx); return; }
-    // annars väljer AI den rad som passar bäst. Osäker AI (eller ingen AI) → du väljer själv.
-    const pick = await aiPickCandidate(original, merged);
-    if (pick) { setLoading(false); await finishManual(pick, ctx); return; }
-    // inget passade (t.ex. "oatmeal" gav bara havrekakor) → prova AI:ns andra sökord, t.ex. det svenska namnet
-    if (!altQueries.length) {
-      const ai = await aiInterpret(original);
-      altQueries = ai ? [ai.name, ...(ai.alternatives || [])] : [];
-    }
-    let extra = [];
-    for (const q of [...new Set(altQueries)].filter((q) => q && q.toLowerCase() !== name.toLowerCase()).slice(0, 3)) {
-      const alt = (await lookupFoodDatabase(q, profileInfo.country)).results || [];
-      if (!alt.length) continue;
-      const altPick = await aiPickCandidate(original, alt);
-      if (altPick) { setCandidates(alt); setLoading(false); await finishManual(altPick, ctx); return; }
-      extra = [...extra, ...alt];
-    }
+    // annars: listan över vanliga livsmedel eller AI:ns val (görs på servern)
     setLoading(false);
-    // fortfarande osäker → du väljer själv bland alla träffar
-    const seen = new Set();
-    setCandidates([...extra, ...merged].filter((c) => (seen.has(c.id) ? false : seen.add(c.id))));
+    if (resolved.pick) { await finishManual(resolved.pick, ctx); return; }
+    // osäker → du väljer själv bland träffarna
     setMode("pick");
   }
 
@@ -1820,10 +1783,10 @@ export default function DotApp() {
     const found = [];
     const missing = [];
     for (const it of items) {
-      const [lookup, remembered] = await Promise.all([lookupFoodDatabase(it.name, profileInfo.country), loadChoices(session, normalizeQuery(it.name))]);
-      const merged = mergeCandidates(remembered, lookup.results);
+      const [resolved, remembered] = await Promise.all([resolveFoodRemote(it.name, it.name, profileInfo.country), loadChoices(session, normalizeQuery(it.name))]);
+      const merged = mergeCandidates(remembered, resolved.results);
       if (!merged.length) { missing.push(it.name); continue; }
-      const hit = remembered.length ? merged[0] : (await aiPickCandidate(it.name, merged)) || merged[0];
+      const hit = remembered.length ? merged[0] : resolved.pick || merged[0];
       const res = await estimateFoodValues(it.name, String(it.grams), "g", {}, hit);
       if (res.notFound) { missing.push(it.name); continue; }
       found.push({ key: `${it.name}-${found.length}`, name: it.name, grams: it.grams, res });
