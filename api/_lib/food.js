@@ -197,20 +197,22 @@ export function parseJsonLoose(text) {
 const PICK_RULES =
   "Regler: 1) Om användaren inte skrivit okokt/torr/rå: välj tillagad variant (kokt ris/pasta, kokt ägg, stekt/kokt kött). " +
   "2) Välj ALDRIG barnmat, konserv, pulver, torkat, fryst färdigrätt, mix eller kylvara om användaren inte nämnt det — välj hellre hemlagad eller den vanligaste neutrala varianten. " +
-  "3) Välj ALDRIG eko-variant, specialkost (\"reduced fat\", \"special dietary\") eller märkesvara om användaren inte nämnt det. " +
+  "3) Välj ALDRIG eko-variant, glutenfri, laktosfri, extrasaltad, osaltad, specialkost (\"reduced fat\", \"special dietary\", \"low sodium\"), snabbmatskedja (\"Fast Food\", \"Pizza Chain\") eller märkesvara om användaren inte nämnt det. " +
   "4) Raden ska vara samma livsmedel, inte en rätt som bara innehåller det (\"ägg\" är inte \"våffla m. ägg\", \"oatmeal\" är inte \"oatmeal cookies\"). " +
   "5) Skrev användaren bara ett enkelt livsmedel, välj den enklaste vanliga formen: \"ägg\"/\"eggs\" = kokt ägg (inte äggröra eller omelett), " +
   "\"gröt\"/\"oatmeal\" = havregrynsgröt kokt på vatten, \"kyckling\" = kycklingfilé/bröst tillagad, \"mjölk\" = vanlig mellanmjölk/standardmjölk. Rätter bara om de nämns. " +
   "Raderna kan vara på svenska eller engelska — det spelar ingen roll vilket språk användaren skrev på.";
 
 // väljer bästa raden för det användaren skrev, eller null
-export async function aiPick(userText, candidates, wantHint = "") {
+export async function aiPick(userText, candidates, wantHint = "", { preferSwedish = false } = {}) {
   if (!candidates || !candidates.length) return null;
-  const list = candidates.slice(0, 30).map((c, i) => `${i}: ${c.name} (${Math.round(c.per100.kcal)} kcal/100 g)`).join("\n");
+  const src = (c) => (String(c.id).startsWith("slv-") ? " [Livsmedelsverket]" : String(c.id).startsWith("usda-") ? " [USDA]" : "");
+  const list = candidates.slice(0, 40).map((c, i) => `${i}: ${c.name} (${Math.round(c.per100.kcal)} kcal/100 g)${src(c)}`).join("\n");
   const system =
     "Du väljer vilken rad i en livsmedelsdatabas som bäst motsvarar det användaren åt. Svara ENDAST med JSON: " +
     '{"index": number} där index är radens nummer. Välj ALLTID den mest sannolika raden — svara -1 bara om ingen rad alls är samma livsmedel. ' +
-    PICK_RULES;
+    PICK_RULES +
+    (preferSwedish ? " Finns både en [Livsmedelsverket]-rad och en [USDA]-rad som passar lika bra, välj [Livsmedelsverket] (den har svenskt namn)." : "");
   const text = `Användaren skrev: "${userText}"${wantHint ? `\nDet som söks: ${wantHint}` : ""}\n\nRader:\n${list}`;
   const parsed = parseJsonLoose(await callAnthropic(system, text, 150));
   const i = Number(parsed.index);
@@ -287,7 +289,8 @@ export async function resolveFood({ query, original, country, lang }) {
   }
   const userText = original || query;
   let pick = null;
-  try { pick = results.length ? await aiPick(userText, results) : null; } catch (e) { console.error("[food] aiPick:", e.message); }
+  const pref = { preferSwedish: lang === "sv" };
+  try { pick = results.length ? await aiPick(userText, results, "", pref) : null; } catch (e) { console.error("[food] aiPick:", e.message); }
   if (pick) return { results, pick, via: "ai" };
   // inget passade → prova andra sökord
   let extra = [];
@@ -298,7 +301,7 @@ export async function resolveFood({ query, original, country, lang }) {
       if (common2) return { results: [common2, ...results], pick: common2, via: "common" };
       const more = await searchAll(q, country, lang, { withOff: false });
       if (!more.length) continue;
-      const p = await aiPick(userText, more);
+      const p = await aiPick(userText, more, "", pref);
       if (p) return { results: [...more, ...results.filter((r) => !more.some((m) => m.id === r.id))], pick: p, via: "ai-alt" };
       extra = [...extra, ...more];
     }
