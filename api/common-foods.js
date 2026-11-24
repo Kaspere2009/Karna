@@ -93,15 +93,17 @@ async function run(action){
 }
 </script></body></html>`;
 
-async function buildEntry([sv, en, want]) {
-  const [a, b, c] = await Promise.all([
+async function buildEntry([sv, en, want, extraQueries = []]) {
+  const searches = [
     searchAll(sv[0], "SE", "sv", { withOff: false }),
     searchAll(en[0], null, "en", { withOff: false }),
     sv[1] ? searchAll(sv[1], "SE", "sv", { withOff: false }) : Promise.resolve([]),
-  ]);
+    ...extraQueries.map((q) => searchAll(q, "SE", "sv", { withOff: false })),
+  ];
+  const [a, b, c, ...extra] = await Promise.all(searches);
   const seen = new Set();
-  const candidates = [...a, ...c, ...b].filter((x) => (seen.has(x.id) ? false : seen.add(x.id)));
-  const pick = await aiPick(`${sv[0]} / ${en[0]}`, candidates, want);
+  const candidates = [...extra.flat(), ...a, ...c, ...b].filter((x) => (seen.has(x.id) ? false : seen.add(x.id)));
+  const pick = await aiPick(`${sv[0]} / ${en[0]}`, candidates, want, { preferSwedish: true });
   if (pick) {
     const rows = [...new Set([...sv, ...en].map(normalizeAlias))].map((alias) => ({
       alias, entry: sv[0], food_id: pick.id, food_name: pick.name, kcal: Math.round(pick.per100.kcal), updated_at: new Date().toISOString(),
