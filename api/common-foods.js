@@ -131,6 +131,8 @@ export default async function handler(req, res) {
   const start = Number(cursor) || 0;
   try {
     if (action === "build") {
+      // första omgången: töm tabellen, så att ord som tagits bort ur listan inte ligger kvar
+      if (start === 0) await supabase("common_foods?alias=not.is.null", { method: "DELETE", prefer: "return=minimal" });
       const batch = COMMON.slice(start, start + BUILD_BATCH);
       const rows = await Promise.all(batch.map((e) => buildEntry(e).catch((err) => ({ entry: e[0][0], food: null, error: err.message }))));
       const next = start + batch.length;
